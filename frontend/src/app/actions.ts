@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 
 import { DECISION_STATUSES, type DecisionStatus, updateDecisionStatus } from "@/lib/api";
 
-// NOTE: like the backend API, this has no authentication yet. Fine on localhost; add auth before hosting.
+// The backend allows this only for people with write access to the decision's repository on GitHub.
 export async function setDecisionStatus(formData: FormData) {
   const id = Number(formData.get("id"));
   const status = formData.get("status") as DecisionStatus;

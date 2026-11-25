@@ -1,24 +1,109 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
-import { Badge, Card, Empty, ExternalLink, Loading } from "@/components/ui";
-import { type Conflict, formatDate, getConflicts, getSummary, prUrl } from "@/lib/api";
+import { Badge, Card, Empty, ExternalLink, GitHubButton, Loading } from "@/components/ui";
+import { type Conflict, type Me, formatDate, getConflicts, getMe, getSummary, prUrl } from "@/lib/api";
 
-export default function Overview() {
+export default function Overview({ searchParams }: PageProps<"/">) {
+  return (
+    <Suspense fallback={<Loading />}>
+      <OverviewBody searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function OverviewBody({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
+  // GitHub sends people back with ?installed=1 after they install Precedent: re-read their repositories.
+  const me = await getMe((await searchParams).installed === "1");
   return (
     <div className="space-y-10">
-      <Suspense fallback={<Loading />}>
-        <Stats />
-      </Suspense>
-      <section>
-        <h2 className="mb-1 text-lg font-semibold">Flagged pull requests</h2>
-        <p className="mb-4 text-sm text-zinc-500">
-          Open PRs whose changes may go against a decision made in an earlier review.
+      <Intro me={me} />
+      {me.repos.length > 0 && (
+        <>
+          <Suspense fallback={<Loading />}>
+            <Stats />
+          </Suspense>
+          <section>
+            <h2 className="mb-1 text-lg font-semibold">Flagged pull requests</h2>
+            <p className="mb-4 text-sm text-zinc-500">
+              Open PRs whose changes may go against a decision made in an earlier review.
+            </p>
+            <Suspense fallback={<Loading label="Loading conflicts…" />}>
+              <FlaggedPRs />
+            </Suspense>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+const repoLink = (name: string) => <ExternalLink href={`https://github.com/${name}`}>{name}</ExternalLink>;
+
+function Intro({ me }: { me: Me }) {
+  const limits = `Free demo: public repositories only, up to ${me.limits.repo_daily_jobs} checks per repository per day.`;
+
+  if (me.demo) {
+    return (
+      <Card className="p-6">
+        <h1 className="text-xl font-semibold tracking-tight">Decision memory for pull requests</h1>
+        <p className="mt-2 max-w-2xl text-zinc-600 dark:text-zinc-400">
+          Teams make decisions in code review (&ldquo;always use the logging module&rdquo;, &ldquo;every endpoint
+          needs type hints&rdquo;) and then forget them. Precedent reads review discussions, extracts those
+          decisions with an LLM, and comments on new pull requests that go against one, linking back to where it
+          was decided.
         </p>
-        <Suspense fallback={<Loading label="Loading conflicts…" />}>
-          <FlaggedPRs />
-        </Suspense>
-      </section>
+        {me.repos.length > 0 && (
+          <p className="mt-3 text-sm text-zinc-500">
+            Below is a live, read-only demo on {me.repos.map((r) => repoLink(r.name))}.
+          </p>
+        )}
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <GitHubButton href="/auth/signin">Sign in with GitHub to try it on your repositories</GitHubButton>
+          <span className="text-xs text-zinc-500">{limits}</span>
+        </div>
+      </Card>
+    );
+  }
+
+  if (me.repos.length === 0) {
+    return (
+      <Card className="p-6">
+        <h1 className="text-xl font-semibold tracking-tight">Welcome, {me.login}</h1>
+        <p className="mt-2 text-zinc-600 dark:text-zinc-400">Three steps to see Precedent work on your own code:</p>
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-400">
+          <li>Install Precedent on one or more public repositories.</li>
+          <li>
+            In a pull request review, state a rule, for example: &ldquo;Let&apos;s always use the logging module
+            instead of print.&rdquo;
+          </li>
+          <li>Open another pull request that breaks it. Precedent comments within a minute or two.</li>
+        </ol>
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <GitHubButton href={me.install_url}>Install Precedent on GitHub</GitHubButton>
+          <span className="text-xs text-zinc-500">{limits}</span>
+        </div>
+      </Card>
+    );
+  }
+
+  const privateRepos = me.repos.filter((r) => r.private);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        Watching {me.repos.length} {me.repos.length === 1 ? "repository" : "repositories"}:{" "}
+        {me.repos.map((r, i) => (
+          <span key={r.name}>
+            {i > 0 && ", "}
+            {repoLink(r.name)}
+            {r.private && " (private, not checked)"}
+          </span>
+        ))}
+        {privateRepos.length > 0 && ". Private repositories are not checked in this free demo"}
+      </p>
+      <a href={me.install_url} className="text-sm text-sky-700 hover:underline dark:text-sky-400">
+        Add or remove repositories
+      </a>
     </div>
   );
 }
@@ -49,9 +134,6 @@ async function Stats() {
           </Link>
         ))}
       </div>
-      {s.repos.length > 0 && (
-        <p className="mt-3 text-xs text-zinc-500">Watching: {s.repos.join(", ")}</p>
-      )}
     </div>
   );
 }

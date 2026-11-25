@@ -17,7 +17,7 @@ import psycopg
 
 from app import config
 from app.github_client import API, HEADERS, _app_jwt, _check
-from app.jobs import retry_failed_jobs
+from app.jobs import prune_old_events, retry_failed_jobs
 
 LOOKBACK = timedelta(hours=6)  # only recent events; older ones are no longer worth acting on
 MAX_PER_SWEEP = 20
@@ -80,7 +80,7 @@ def start_background_sweeps() -> None:
     def loop():
         time.sleep(30)
         while True:
-            for name, step in (("redeliver", sweep), ("retry", retry_failed_jobs)):
+            for name, step in (("redeliver", sweep), ("retry", retry_failed_jobs), ("prune", prune_old_events)):
                 try:
                     step()
                 except Exception as error:  # never let one bad pass kill the loop

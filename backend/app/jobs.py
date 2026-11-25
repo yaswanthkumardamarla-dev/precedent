@@ -17,6 +17,64 @@ def _update(delivery_id: str, sql: str, params: tuple = ()) -> None:
         conn.execute(f"UPDATE webhook_events SET {sql} WHERE delivery_id = %s", (*params, delivery_id))
 
 
+def admit(conn, repo: str, private: bool) -> tuple[str, str | None]:
+    """Decide whether a planned job may run: ("queued", None), or ("skipped" | "limited", reason)."""
+    if private:
+        return "skipped", "Private repositories are not checked in this free demo."
+    owner = repo.split("/")[0]
+    counts = conn.execute(
+        """
+        SELECT count(*) FILTER (WHERE repo = %(repo)s),
+               count(*) FILTER (WHERE split_part(repo, '/', 1) = %(owner)s),
+               count(*)
+        FROM webhook_events
+        WHERE job IS NOT NULL AND status NOT IN ('skipped', 'limited')
+          AND received_at > now() - interval '24 hours'
+        """,
+        {"repo": repo, "owner": owner},
+    ).fetchone()
+    for used, limit, scope in (
+        (counts[0], config.REPO_DAILY_JOB_LIMIT, "this repository"),
+        (counts[1], config.OWNER_DAILY_JOB_LIMIT, f"repositories owned by {owner}"),
+        (counts[2], config.GLOBAL_DAILY_JOB_LIMIT, "the whole demo"),
+    ):
+        if used >= limit:
+            return "limited", f"Daily limit reached for {scope} ({limit} checks per 24 hours). Try again tomorrow."
+    return "queued", None
+
+
+def forget_repos(names: list[str]) -> None:
+    """Delete everything stored about these repositories (when Precedent is removed from them)."""
+    if not names:
+        return
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        conn.execute("DELETE FROM conflicts WHERE repo = ANY(%s)", (names,))
+        conn.execute("DELETE FROM decisions WHERE repo = ANY(%s)", (names,))
+        conn.execute("DELETE FROM webhook_events WHERE repo = ANY(%s)", (names,))
+    print(f"[cleanup] removed all data for {', '.join(names)}", flush=True)
+
+
+def forget_owner(login: str | None) -> None:
+    """Delete everything stored about one account's repositories (when Precedent is uninstalled there)."""
+    if not login:
+        return
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        repos = [r[0] for r in conn.execute(
+            """
+            SELECT repo FROM decisions WHERE split_part(repo, '/', 1) = %(o)s
+            UNION SELECT repo FROM webhook_events WHERE split_part(repo, '/', 1) = %(o)s
+            """,
+            {"o": login},
+        )]
+    forget_repos(repos)
+
+
+def prune_old_events() -> None:
+    """Webhook records are only for the Activity page; drop them after 30 days to keep the database small."""
+    with psycopg.connect(config.DATABASE_URL) as conn:
+        conn.execute("DELETE FROM webhook_events WHERE received_at < now() - interval '30 days'")
+
+
 def run_job(delivery_id: str, job: str, repo: str, number: int) -> None:
     """Run one job and record how it went. Safe to repeat: each run works from the PR's current state."""
     _update(delivery_id, "status = 'running', attempts = attempts + 1, error = NULL, finished_at = NULL")

@@ -22,6 +22,14 @@ API_TOKEN = os.environ.get("API_TOKEN", "").strip()
 # How often to ask GitHub to resend webhooks we missed (e.g. while asleep on a free host). 0 turns it off.
 REDELIVERY_SWEEP_SECONDS = int(os.environ.get("REDELIVERY_SWEEP_SECONDS", "300"))
 
+# Repositories anyone can browse without signing in (comma-separated OWNER/REPO), read-only.
+DEMO_REPOS = [r.strip() for r in os.environ.get("DEMO_REPOS", "").split(",") if r.strip()]
+
+# Free-tier limits, so no one can use up the shared Gemini quota. Counted over the last 24 hours.
+REPO_DAILY_JOB_LIMIT = int(os.environ.get("REPO_DAILY_JOB_LIMIT", "20"))
+OWNER_DAILY_JOB_LIMIT = int(os.environ.get("OWNER_DAILY_JOB_LIMIT", "40"))
+GLOBAL_DAILY_JOB_LIMIT = int(os.environ.get("GLOBAL_DAILY_JOB_LIMIT", "300"))
+
 
 def _key_file() -> Path:
     path = Path(GITHUB_PRIVATE_KEY_PATH)
