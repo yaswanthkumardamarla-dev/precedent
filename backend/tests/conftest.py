@@ -6,7 +6,6 @@ from pathlib import Path
 for key, value in {
     "DATABASE_URL": "postgresql://unused@127.0.0.1:1/unused",
     "GITHUB_WEBHOOK_SECRET": "test-secret",
-    "GITHUB_APP_ID": "1",
     "GITHUB_CLIENT_ID": "test",
     "GEMINI_API_KEY": "test",
     "API_TOKEN": "test-token",

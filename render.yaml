@@ -33,16 +33,12 @@ services:
         sync: false
       - key: GITHUB_WEBHOOK_SECRET
         sync: false
-      - key: GITHUB_APP_ID
-        sync: false
       - key: GITHUB_CLIENT_ID
         sync: false
       # The App's private key goes in a Secret File named github-app.pem (Environment, then Secret Files),
-      # which Render serves at this path. GITHUB_PRIVATE_KEY is only a fallback when that file is absent.
+      # which Render serves at this path.
       - key: GITHUB_PRIVATE_KEY_PATH
         value: /etc/secrets/github-app.pem
-      - key: GITHUB_PRIVATE_KEY
-        sync: false
       - key: GEMINI_API_KEY
         sync: false
 

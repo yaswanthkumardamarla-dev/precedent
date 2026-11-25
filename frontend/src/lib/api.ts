@@ -52,8 +52,9 @@ export type WebhookEvent = {
   action: string | null;
   repo: string | null;
   job: "check" | "extract" | null;
-  status: "queued" | "done" | "failed" | "ignored" | null;
+  status: "queued" | "running" | "done" | "failed" | "ignored" | null;
   error: string | null;
+  attempts: number;
   received_at: string;
   finished_at: string | null;
   pr_number: number | null;

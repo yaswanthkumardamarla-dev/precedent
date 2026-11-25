@@ -7,7 +7,12 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     action      TEXT,
     repo        TEXT,
     payload     JSONB NOT NULL,
-    received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    job         TEXT,
+    status      TEXT,
+    error       TEXT,
+    finished_at TIMESTAMPTZ,
+    attempts    INT NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
@@ -40,7 +45,5 @@ CREATE TABLE IF NOT EXISTS conflicts (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS job         TEXT;
-ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS status      TEXT;
-ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS error       TEXT;
-ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+-- Upgrade for databases created before job retries existed.
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS attempts INT NOT NULL DEFAULT 0;

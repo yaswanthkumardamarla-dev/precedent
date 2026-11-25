@@ -17,6 +17,7 @@ import psycopg
 
 from app import config
 from app.github_client import API, HEADERS, _app_jwt, _check
+from app.jobs import retry_failed_jobs
 
 LOOKBACK = timedelta(hours=6)  # only recent events; older ones are no longer worth acting on
 MAX_PER_SWEEP = 20
@@ -70,7 +71,8 @@ def sweep() -> int:
 
 
 def start_background_sweeps() -> None:
-    """Run sweep() 30s after startup (GitHub needs a moment to mark a timeout as failed), then periodically."""
+    """Every few minutes (first after 30s, so GitHub has marked any timeout as failed): ask GitHub to resend
+    webhooks we never received, and re-run jobs that failed or were cut off."""
     interval = config.REDELIVERY_SWEEP_SECONDS
     if interval <= 0:
         return
@@ -78,10 +80,11 @@ def start_background_sweeps() -> None:
     def loop():
         time.sleep(30)
         while True:
-            try:
-                sweep()
-            except Exception as error:  # never let a GitHub hiccup kill the loop
-                print(f"[redeliver] sweep failed: {error}", flush=True)
+            for name, step in (("redeliver", sweep), ("retry", retry_failed_jobs)):
+                try:
+                    step()
+                except Exception as error:  # never let one bad pass kill the loop
+                    print(f"[{name}] pass failed: {error}", flush=True)
             time.sleep(interval)
 
     threading.Thread(target=loop, name="redeliver", daemon=True).start()
