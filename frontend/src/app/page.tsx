@@ -1,69 +1,110 @@
-import Image from "next/image";
+import Link from "next/link";
+import { Suspense } from "react";
 
-export default function Home() {
+import { Badge, Card, Empty, ExternalLink, Loading } from "@/components/ui";
+import { type Conflict, formatDate, getConflicts, getSummary, prUrl } from "@/lib/api";
+
+export default function Overview() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+    <div className="space-y-10">
+      <Suspense fallback={<Loading />}>
+        <Stats />
+      </Suspense>
+      <section>
+        <h2 className="mb-1 text-lg font-semibold">Flagged pull requests</h2>
+        <p className="mb-4 text-sm text-zinc-500">
+          Open PRs whose changes may go against a decision made in an earlier review.
+        </p>
+        <Suspense fallback={<Loading label="Loading conflicts…" />}>
+          <FlaggedPRs />
+        </Suspense>
+      </section>
+    </div>
+  );
+}
+
+async function Stats() {
+  const s = await getSummary();
+  const stats = [
+    { label: "Proposed decisions", value: s.decisions.proposed, href: "/decisions?status=proposed", hint: "awaiting review" },
+    { label: "Accepted decisions", value: s.decisions.accepted, href: "/decisions?status=accepted", hint: "enforced" },
+    { label: "Conflicts", value: s.conflicts, href: "#flagged", hint: `across ${s.prs_with_conflicts} PR(s)` },
+    {
+      label: "Failed jobs",
+      value: s.failed_jobs_7d,
+      href: "/activity",
+      hint: s.queued_jobs ? `${s.queued_jobs} queued` : "last 7 days",
+    },
+  ];
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {stats.map((stat) => (
+          <Link key={stat.label} href={stat.href}>
+            <Card className="h-full transition-colors hover:border-zinc-400 dark:hover:border-zinc-600">
+              <div className="text-sm text-zinc-500">{stat.label}</div>
+              <div className="mt-1 text-3xl font-semibold tabular-nums">{stat.value}</div>
+              <div className="mt-1 text-xs text-zinc-400">{stat.hint}</div>
+            </Card>
+          </Link>
+        ))}
+      </div>
+      {s.repos.length > 0 && (
+        <p className="mt-3 text-xs text-zinc-500">Watching: {s.repos.join(", ")}</p>
+      )}
+    </div>
+  );
+}
+
+async function FlaggedPRs() {
+  const conflicts = await getConflicts();
+  if (conflicts.length === 0) {
+    return <Empty>No conflicts. New PRs are checked automatically when they are opened or updated.</Empty>;
+  }
+
+  const byPr = new Map<string, Conflict[]>();
+  for (const c of conflicts) {
+    const key = `${c.repo}#${c.pr_number}`;
+    byPr.set(key, [...(byPr.get(key) ?? []), c]);
+  }
+
+  return (
+    <div id="flagged" className="space-y-4">
+      {[...byPr.entries()].map(([key, items]) => {
+        const { repo, pr_number, created_at } = items[0];
+        return (
+          <Card key={key}>
+            <div className="mb-3 flex items-baseline justify-between gap-4">
+              <ExternalLink href={prUrl(repo, pr_number)}>
+                <span className="font-medium">
+                  {repo} #{pr_number}
+                </span>
+              </ExternalLink>
+              <span className="text-xs text-zinc-400">checked {formatDate(created_at)}</span>
+            </div>
+            <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {items.map((c) => (
+                <li key={c.id} className="py-3 first:pt-0 last:pb-0">
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="font-medium">{c.decision_statement}</p>
+                    {c.decision_status === "retired" && <Badge status="retired" />}
+                  </div>
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{c.explanation}</p>
+                  {c.evidence && (
+                    <pre className="mt-2 overflow-x-auto rounded bg-zinc-100 px-2 py-1 font-mono text-xs dark:bg-zinc-800">
+                      {c.evidence}
+                    </pre>
+                  )}
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Decided in <ExternalLink href={c.decision_url}>PR #{c.decision_pr_number}</ExternalLink>
+                    {c.confidence != null && <> · confidence {Math.round(c.confidence * 100)}%</>}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        );
+      })}
     </div>
   );
 }

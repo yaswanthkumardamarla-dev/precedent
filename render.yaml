@@ -1,0 +1,61 @@
+# Render Blueprint: Dashboard → New → Blueprint → pick this repo.
+# Render shows every service, its plan and its monthly price before anything is created.
+
+databases:
+  - name: precedent-db
+    databaseName: precedent
+    user: precedent
+    # Paid so data persists; Render's free databases are deleted after 30 days.
+    plan: basic-256mb
+
+services:
+  - type: web
+    name: precedent-backend
+    runtime: python
+    rootDir: backend
+    # Always-on plan: GitHub gives a webhook 10 seconds and does not retry, and a sleeping
+    # free instance takes longer than that to wake, so webhooks would be lost.
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: python -m app.migrate
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DATABASE_URL
+        fromDatabase:
+          name: precedent-db
+          property: connectionString
+      - key: API_TOKEN
+        generateValue: true
+      # Values from your GitHub App and Gemini; Render asks for these when the Blueprint is created.
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_PRIVATE_KEY  # paste the whole contents of the .pem file
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+
+  - type: web
+    name: precedent-dashboard
+    runtime: node
+    rootDir: frontend
+    plan: free  # sleeping is fine here: the first page load after a while just takes longer
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      # If Render gives the backend a different URL (shown on its page), change this to match.
+      - key: BACKEND_URL
+        value: https://precedent-backend.onrender.com
+      - key: BACKEND_API_TOKEN
+        fromService:
+          name: precedent-backend
+          type: web
+          envVarKey: API_TOKEN
+      - key: DASHBOARD_PASSWORD
+        generateValue: true

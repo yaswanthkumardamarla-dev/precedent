@@ -10,12 +10,14 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from psycopg.types.json import Jsonb
 
 from app import config  # loads backend/.env
+from app.api import router as api_router
 from app.check import check_pr
 from app.extract import extract_pr
 
 WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 
 app = FastAPI(title="Precedent")
+app.include_router(api_router)
 
 
 @app.get("/health")

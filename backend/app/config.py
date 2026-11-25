@@ -17,6 +17,9 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "gemini-embedding-001")
 EMBEDDING_DIM = 768
 
+# Shared secret the dashboard sends to read and change data. Without it, /api/* refuses every request.
+API_TOKEN = os.environ.get("API_TOKEN", "").strip()
+
 
 def github_private_key() -> str:
     """Return the GitHub App private key.
