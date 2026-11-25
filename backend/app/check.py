@@ -89,6 +89,12 @@ def save_conflicts(repo: str, number: int, conflicts) -> None:
             )
 
 
+def one_line_code(text: str) -> str:
+    """Show evidence as inline code on one line, so multi-line snippets can't break the bullet list."""
+    flat = " ⏎ ".join(line.strip() for line in text.strip().splitlines() if line.strip())
+    return f"`{flat.replace('`', 'ʼ')}`" if flat else "(not given)"
+
+
 def comment_body(conflicts, by_id: dict[int, dict]) -> str:
     if not conflicts:
         return f"{MARKER}\n### ✅ Precedent: no conflicts with past decisions\n"
@@ -104,7 +110,7 @@ def comment_body(conflicts, by_id: dict[int, dict]) -> str:
             "",
             c.explanation,
             "",
-            f"- Where: {c.evidence}",
+            f"- Where: {one_line_code(c.evidence)}",
             f"- Decided in: {d['source_url']}",
             "",
         ]

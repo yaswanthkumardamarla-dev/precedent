@@ -1,0 +1,39 @@
+# Render Blueprint for the backend only (free plan): New → Blueprint → pick this repo.
+# The dashboard is hosted on Vercel; see "Deploying for free" in the README.
+#
+# The database is not on Render (Render deletes free databases after 30 days). Create a free
+# Postgres on neon.tech, which has pgvector and does not expire, and paste its connection string
+# as DATABASE_URL when Render asks.
+#
+# Free services sleep after 15 idle minutes and take up to a minute to wake. A webhook that arrives
+# while the backend sleeps times out at GitHub, but the backend asks GitHub to resend missed
+# webhooks once it is awake (app/redeliver.py), so nothing is lost; it is just handled later.
+
+services:
+  - type: web
+    name: precedent-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.migrate && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: API_TOKEN  # generated; copy it to Vercel as BACKEND_API_TOKEN
+        generateValue: true
+      # Render asks for these when the Blueprint is created.
+      - key: DATABASE_URL  # the Neon connection string
+        sync: false
+      - key: GITHUB_WEBHOOK_SECRET
+        sync: false
+      - key: GITHUB_APP_ID
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_PRIVATE_KEY  # paste the whole contents of the .pem file
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+

@@ -82,7 +82,14 @@ def to_vector(values: list[float]) -> str:
     return "[" + ",".join(str(v) for v in values) + "]"
 
 
-def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> None:
+def normalize(statement: str) -> str:
+    """Compare decisions loosely, so case and a trailing period don't make two rules look different."""
+    return statement.strip().lower().rstrip(".")
+
+
+def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> int:
+    """Store decisions; returns how many were skipped because they were already reviewed."""
+    skipped = 0
     with psycopg.connect(config.DATABASE_URL) as conn:
         # NEW: several webhook jobs for the same PR can run at once; make them take turns.
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{repo}#{number}",))
@@ -91,7 +98,17 @@ def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> None
             "DELETE FROM decisions WHERE repo = %s AND pr_number = %s AND status = 'proposed'",
             (repo, number),
         )
+        # Decisions someone already accepted or retired stay; don't add them back as new proposals.
+        reviewed = {
+            normalize(statement) for (statement,) in conn.execute(
+                "SELECT statement FROM decisions WHERE repo = %s AND pr_number = %s",
+                (repo, number),
+            )
+        }
         for decision, embedding in zip(decisions, embeddings):
+            if normalize(decision.statement) in reviewed:
+                skipped += 1
+                continue
             source = by_id[decision.source_comment_id]
             conn.execute(
                 """
@@ -112,6 +129,7 @@ def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> None
                     to_vector(embedding),
                 ),
             )
+    return skipped
 
 
 def extract_pr(repo: str, number: int, show: bool = False) -> int:
@@ -140,11 +158,11 @@ def extract_pr(repo: str, number: int, show: bool = False) -> int:
     # Guard against made-up citations: keep only decisions that point to a real comment.
     valid = [d for d in decisions if d.source_comment_id in by_id]
     dropped = len(decisions) - len(valid)
-     # The same rule stated twice (e.g. a repeated comment) should be stored once.
+    # The same rule stated twice (e.g. a repeated comment) should be stored once.
     seen: set[str] = set()
     unique = []
     for d in valid:
-        key = d.statement.strip().lower().rstrip(".")
+        key = normalize(d.statement)
         if key not in seen:
             seen.add(key)
             unique.append(d)
@@ -156,9 +174,11 @@ def extract_pr(repo: str, number: int, show: bool = False) -> int:
             embeddings = embed_documents([d.statement for d in valid])
 
     with progress("saving to the database"):
-        save_decisions(repo, number, valid, embeddings, by_id)
+        skipped = save_decisions(repo, number, valid, embeddings, by_id)
 
-    print(f"\nSaved {len(valid)} decision(s):")
+    print(f"\nSaved {len(valid) - skipped} decision(s):")
+    if skipped:
+        print(f"    ({skipped} more were already accepted or retired, and kept as they were)")
     for d in valid:
         print(f"  - {d.statement}  (confidence {d.confidence:.2f})")
         print(f"    source: {by_id[d.source_comment_id]['html_url']}")
