@@ -155,7 +155,7 @@ To check it: open a PR in a watched repo. Within a minute or two it shows up und
 | `GITHUB_PRIVATE_KEY_PATH` | | `github-app.pem` (relative to `backend/`) |
 | `GITHUB_PRIVATE_KEY` | | Key text; used only when the file at `GITHUB_PRIVATE_KEY_PATH` doesn't exist |
 | `GEMINI_API_KEY` | yes | |
-| `GEMINI_MODEL` | | `gemini-flash-latest` |
+| `GEMINI_MODEL` | | `gemini-3.5-flash-lite` |
 | `EMBEDDING_MODEL` | | `gemini-embedding-001` |
 | `API_TOKEN` | yes | Shared with the dashboard as `BACKEND_API_TOKEN` |
 | `REDELIVERY_SWEEP_SECONDS` | | `300`; how often to ask GitHub to resend missed webhooks. `0` turns it off |
