@@ -1,7 +1,7 @@
 // Server-side access to the Precedent FastAPI backend. Only import this from Server Components and Server Actions.
 import { connection } from "next/server";
 
-export const BACKEND_URL = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
+export const BACKEND_URL = (process.env.BACKEND_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 
 export const DECISION_STATUSES = ["proposed", "accepted", "retired"] as const;
 export type DecisionStatus = (typeof DECISION_STATUSES)[number];

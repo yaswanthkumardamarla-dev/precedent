@@ -117,21 +117,31 @@ cd frontend && npm run lint && npm run build
 
 GitHub Actions runs both on every push to `main` and on every pull request.
 
-## Deploying for free (Render + Neon)
+## Deploying for free (Neon + Render + Vercel)
 
-Everything runs on free plans: the database on [Neon](https://neon.tech), and the backend and dashboard on [Render](https://render.com) using [`render.yaml`](render.yaml). Neither needs a credit card.
+| Part | Where | Why there |
+| --- | --- | --- |
+| Database | [Neon](https://neon.tech) | Free Postgres with pgvector that doesn't expire |
+| Backend | [Render](https://render.com), via [`render.yaml`](render.yaml) | A normal long-running server, which the webhook jobs and missed-webhook recovery need |
+| Dashboard | [Vercel](https://vercel.com) | Made for Next.js, and free projects don't sleep |
 
-1. **Database:** sign up at neon.tech and create a project. Copy its connection string (it starts with `postgresql://` and ends with `sslmode=require`). pgvector is built in, and the tables are created when the backend first starts.
-2. **Render:** choose **New → Blueprint**, then pick this repository. Fill in what it asks for: `DATABASE_URL` (the Neon string), `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GEMINI_API_KEY`, and `GITHUB_PRIVATE_KEY` (paste the full contents of the `.pem` file). `API_TOKEN` and `DASHBOARD_PASSWORD` are generated for you.
-3. When it's deployed, check that the backend's URL is `https://precedent-backend.onrender.com`. If Render gave it a different one, update `BACKEND_URL` on the dashboard service to match.
-4. In the GitHub App's settings, set the **Webhook URL** to `https://<backend URL>/webhooks/github`, and stop smee.
-5. Open the dashboard and sign in. The password is under **precedent-dashboard → Environment → DASHBOARD_PASSWORD**, and you can change it to your own there.
+None of them needs a credit card. Set them up in this order:
+
+1. **Database (Neon):** sign up and create a project. Copy its connection string (it starts with `postgresql://` and ends with `sslmode=require`). pgvector is built in, and the tables are created when the backend first starts.
+2. **Backend (Render):** choose **New → Blueprint**, then pick this repository. Fill in what it asks for: `DATABASE_URL` (the Neon string), `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GEMINI_API_KEY`, and `GITHUB_PRIVATE_KEY` (paste the full contents of the `.pem` file). When it's deployed, note two things on the service's page: its URL (for example `https://precedent-backend.onrender.com`), and under **Environment**, the generated `API_TOKEN`. Opening `<URL>/health` should show `"status": "ok"`.
+3. **Dashboard (Vercel):** choose **Add New → Project** and import this repository. Set **Root Directory** to `frontend`; Vercel detects Next.js by itself. Under **Environment Variables**, add:
+   - `BACKEND_URL`: the backend URL from step 2, with no trailing slash
+   - `BACKEND_API_TOKEN`: the `API_TOKEN` value from step 2
+   - `DASHBOARD_PASSWORD`: a password of your choice
+
+   Then deploy. If you change these variables later, redeploy so they take effect.
+4. **GitHub App:** in its settings, set the **Webhook URL** to `<backend URL>/webhooks/github`, and stop smee.
 
 What "free" costs you:
 
-- **Free services sleep after 15 idle minutes.** The first page load after that takes up to a minute.
-- **A webhook that arrives while the backend sleeps times out at GitHub.** GitHub never retries on its own, so once the backend is awake it asks GitHub to resend any webhooks it missed (`app/redeliver.py`, every 5 minutes). Nothing is lost, but the PR comment may arrive a minute or two late. To avoid the delay, move the backend to Render's always-on Starter plan ($7/month).
-- **Neon's free database holds 0.5 GB,** far more than decisions need.
+- **The backend sleeps after 15 idle minutes.** A webhook that arrives while it sleeps times out at GitHub. GitHub never retries on its own, so once the backend is awake it asks GitHub to resend any webhooks it missed (`app/redeliver.py`, every 5 minutes). Nothing is lost, but a PR comment may arrive a minute or two late.
+- **The first dashboard load after a quiet stretch can take up to a minute,** because the dashboard waits for the backend to wake. The dashboard itself doesn't sleep.
+- To remove both delays, move the backend to Render's always-on Starter plan ($7/month).
 
 To check it: open a PR in a watched repo. Within a minute or two it shows up under **Activity** on the dashboard, and the PR gets Precedent's comment if it breaks a decision.
 
