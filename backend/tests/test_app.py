@@ -81,3 +81,25 @@ def test_evidence_is_rendered_on_one_line():
 
     assert one_line_code('@app.get("/x")\ndef f(a):') == '`@app.get("/x") ⏎ def f(a):`'
     assert one_line_code("") == "(not given)"
+
+
+def test_choose_redeliveries():
+    from datetime import datetime, timezone
+
+    from app.redeliver import choose_redeliveries
+
+    now = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
+
+    def d(id_, guid, code, at="2026-11-25T11:00:00Z"):
+        return {"id": id_, "guid": guid, "status_code": code, "delivered_at": at, "event": "pull_request"}
+
+    deliveries = [
+        d(1, "timed-out", 0),
+        d(2, "timed-out", 0),                        # second failed attempt of the same event
+        d(3, "already-stored", 0),                   # we have it, e.g. the request got through slowly
+        d(4, "later-succeeded", 502), d(5, "later-succeeded", 200),
+        d(6, "too-old", 0, at="2026-11-25T03:00:00Z"),
+        d(7, "fine", 200),
+    ]
+    chosen = choose_redeliveries(deliveries, known_guids={"already-stored"}, now=now)
+    assert [c["guid"] for c in chosen] == ["timed-out"]

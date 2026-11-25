@@ -20,6 +20,9 @@ EMBEDDING_DIM = 768
 # Shared secret the dashboard sends to read and change data. Without it, /api/* refuses every request.
 API_TOKEN = os.environ.get("API_TOKEN", "").strip()
 
+# How often to ask GitHub to resend webhooks we missed (e.g. while asleep on a free host). 0 turns it off.
+REDELIVERY_SWEEP_SECONDS = int(os.environ.get("REDELIVERY_SWEEP_SECONDS", "300"))
+
 
 def github_private_key() -> str:
     """Return the GitHub App private key.

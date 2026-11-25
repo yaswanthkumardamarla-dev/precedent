@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import traceback
+from contextlib import asynccontextmanager
 
 import psycopg
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
@@ -13,10 +14,19 @@ from app import config  # loads backend/.env
 from app.api import router as api_router
 from app.check import check_pr
 from app.extract import extract_pr
+from app.redeliver import start_background_sweeps
 
 WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 
-app = FastAPI(title="Precedent")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    start_background_sweeps()
+    yield
+
+
+app = FastAPI(title="Precedent", lifespan=lifespan)
 app.include_router(api_router)
 
 

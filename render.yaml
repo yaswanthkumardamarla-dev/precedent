@@ -1,35 +1,30 @@
-# Render Blueprint: Dashboard → New → Blueprint → pick this repo.
-# Render shows every service, its plan and its monthly price before anything is created.
-
-databases:
-  - name: precedent-db
-    databaseName: precedent
-    user: precedent
-    # Paid so data persists; Render's free databases are deleted after 30 days.
-    plan: basic-256mb
+# Render Blueprint: Dashboard → New → Blueprint → pick this repo. Everything here is on free plans.
+#
+# The database is not on Render (Render deletes free databases after 30 days). Create a free
+# Postgres on neon.tech, which has pgvector and does not expire, and paste its connection string
+# as DATABASE_URL when Render asks.
+#
+# Free services sleep after 15 idle minutes and take up to a minute to wake. A webhook that arrives
+# while the backend sleeps times out at GitHub, but the backend asks GitHub to resend missed
+# webhooks once it is awake (app/redeliver.py), so nothing is lost; it is just handled later.
 
 services:
   - type: web
     name: precedent-backend
     runtime: python
     rootDir: backend
-    # Always-on plan: GitHub gives a webhook 10 seconds and does not retry, and a sleeping
-    # free instance takes longer than that to wake, so webhooks would be lost.
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
-    preDeployCommand: python -m app.migrate
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: python -m app.migrate && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
-      - key: DATABASE_URL
-        fromDatabase:
-          name: precedent-db
-          property: connectionString
       - key: API_TOKEN
         generateValue: true
-      # Values from your GitHub App and Gemini; Render asks for these when the Blueprint is created.
+      # Render asks for these when the Blueprint is created.
+      - key: DATABASE_URL  # the Neon connection string
+        sync: false
       - key: GITHUB_WEBHOOK_SECRET
         sync: false
       - key: GITHUB_APP_ID
@@ -45,7 +40,7 @@ services:
     name: precedent-dashboard
     runtime: node
     rootDir: frontend
-    plan: free  # sleeping is fine here: the first page load after a while just takes longer
+    plan: free
     buildCommand: npm ci && npm run build
     startCommand: npm start
     envVars:
@@ -57,5 +52,5 @@ services:
           name: precedent-backend
           type: web
           envVarKey: API_TOKEN
-      - key: DASHBOARD_PASSWORD
+      - key: DASHBOARD_PASSWORD  # set your own here, or copy the generated one from Render
         generateValue: true

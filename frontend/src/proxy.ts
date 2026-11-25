@@ -1,42 +1,29 @@
 import { type NextRequest, NextResponse } from "next/server";
 
-// Password-protects every page and Server Action with HTTP Basic auth (any username, DASHBOARD_PASSWORD).
+import { SESSION_COOKIE, safeEqual, sessionValue } from "@/lib/session";
+
+// Every page and Server Action needs a session cookie, which /login hands out for DASHBOARD_PASSWORD.
 // In production a missing password locks the dashboard instead of leaving it open.
 
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-function passwordFrom(request: NextRequest): string | null {
-  const header = request.headers.get("authorization");
-  if (!header?.startsWith("Basic ")) return null;
-  try {
-    const decoded = atob(header.slice(6));
-    return decoded.slice(decoded.indexOf(":") + 1);
-  } catch {
-    return null;
-  }
-}
-
-export function proxy(request: NextRequest) {
-  const expected = process.env.DASHBOARD_PASSWORD;
-  if (!expected) {
+export async function proxy(request: NextRequest) {
+  const password = process.env.DASHBOARD_PASSWORD;
+  if (!password) {
     if (process.env.NODE_ENV === "production") {
       return new NextResponse("DASHBOARD_PASSWORD is not set, so the dashboard is locked.", { status: 503 });
     }
     return NextResponse.next(); // local development without a password
   }
 
-  const given = passwordFrom(request);
-  if (given !== null && safeEqual(given, expected)) return NextResponse.next();
+  const { pathname, search } = request.nextUrl;
+  if (pathname === "/login") return NextResponse.next();
 
-  return new NextResponse("Sign in to Precedent.", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="Precedent", charset="UTF-8"' },
-  });
+  const cookie = request.cookies.get(SESSION_COOKIE)?.value;
+  if (cookie && safeEqual(cookie, await sessionValue(password))) return NextResponse.next();
+
+  if (request.method !== "GET") return new NextResponse("Sign in first.", { status: 401 });
+  const login = new URL("/login", request.url);
+  if (pathname !== "/") login.searchParams.set("next", pathname + search);
+  return NextResponse.redirect(login);
 }
 
 export const config = {

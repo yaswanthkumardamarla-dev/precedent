@@ -10,6 +10,7 @@ for key, value in {
     "GITHUB_CLIENT_ID": "test",
     "GEMINI_API_KEY": "test",
     "API_TOKEN": "test-token",
+    "REDELIVERY_SWEEP_SECONDS": "0",
 }.items():
     os.environ[key] = value
 
