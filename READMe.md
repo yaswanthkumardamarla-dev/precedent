@@ -128,7 +128,7 @@ GitHub Actions runs both on every push to `main` and on every pull request.
 None of them needs a credit card. Set them up in this order:
 
 1. **Database (Neon):** sign up and create a project. Copy its connection string (it starts with `postgresql://` and ends with `sslmode=require`). pgvector is built in, and the tables are created when the backend first starts.
-2. **Backend (Render):** choose **New → Blueprint**, then pick this repository. Fill in what it asks for: `DATABASE_URL` (the Neon string), `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, `GEMINI_API_KEY`, and `GITHUB_PRIVATE_KEY` (paste the full contents of the `.pem` file). When it's deployed, note two things on the service's page: its URL (for example `https://precedent-backend.onrender.com`), and under **Environment**, the generated `API_TOKEN`. Opening `<URL>/health` should show `"status": "ok"`.
+2. **Backend (Render):** choose **New → Blueprint**, then pick this repository. Fill in what it asks for: `DATABASE_URL` (the Neon string), `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, and `GEMINI_API_KEY`. Leave `GITHUB_PRIVATE_KEY` empty. Instead, open the service's **Environment → Secret Files**, add a file named `github-app.pem`, and paste the full contents of the `.pem` file. When the service starts, its log shows `[startup] GitHub App key: OK` if the key loaded. When it's deployed, note two things on the service's page: its URL (for example `https://precedent-backend.onrender.com`), and under **Environment**, the generated `API_TOKEN`. Opening `<URL>/health` should show `"status": "ok"`.
 3. **Dashboard (Vercel):** choose **Add New → Project** and import this repository. Set **Root Directory** to `frontend`; Vercel detects Next.js by itself. Under **Environment Variables**, add:
    - `BACKEND_URL`: the backend URL from step 2, with no trailing slash
    - `BACKEND_API_TOKEN`: the `API_TOKEN` value from step 2
@@ -153,7 +153,7 @@ To check it: open a PR in a watched repo. Within a minute or two it shows up und
 | `GITHUB_WEBHOOK_SECRET` | yes | |
 | `GITHUB_APP_ID`, `GITHUB_CLIENT_ID` | yes | |
 | `GITHUB_PRIVATE_KEY_PATH` | | `github-app.pem` (relative to `backend/`) |
-| `GITHUB_PRIVATE_KEY` | | Key text, used instead of the file when hosted |
+| `GITHUB_PRIVATE_KEY` | | Key text; used only when the file at `GITHUB_PRIVATE_KEY_PATH` doesn't exist |
 | `GEMINI_API_KEY` | yes | |
 | `GEMINI_MODEL` | | `gemini-flash-latest` |
 | `EMBEDDING_MODEL` | | `gemini-embedding-001` |

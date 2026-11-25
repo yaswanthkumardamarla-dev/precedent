@@ -22,6 +22,7 @@ WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    print(f"[startup] GitHub App key: {config.describe_github_key()}", flush=True)
     start_background_sweeps()
     yield
 

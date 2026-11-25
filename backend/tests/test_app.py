@@ -103,3 +103,19 @@ def test_choose_redeliveries():
     ]
     chosen = choose_redeliveries(deliveries, known_guids={"already-stored"}, now=now)
     assert [c["guid"] for c in chosen] == ["timed-out"]
+
+
+def test_normalize_pem_repairs_pasted_keys():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from app.config import normalize_pem
+
+    pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()
+    ).decode()
+    lines = pem.strip().splitlines()
+    for damaged in (pem, " ".join(lines), "\n".join(lines), "".join(lines), '"' + "\r\n".join(lines) + '"'):
+        fixed = normalize_pem(damaged)
+        serialization.load_pem_private_key(fixed.encode(), password=None)
+        assert fixed.splitlines()[0] == "-----BEGIN RSA PRIVATE KEY-----"
