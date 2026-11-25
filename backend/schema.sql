@@ -39,3 +39,8 @@ CREATE TABLE IF NOT EXISTS conflicts (
     confidence  REAL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS job         TEXT;
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS status      TEXT;
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS error       TEXT;
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;

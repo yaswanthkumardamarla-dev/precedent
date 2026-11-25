@@ -84,6 +84,8 @@ def to_vector(values: list[float]) -> str:
 
 def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> None:
     with psycopg.connect(config.DATABASE_URL) as conn:
+        # NEW: several webhook jobs for the same PR can run at once; make them take turns.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{repo}#{number}",))
         # Re-running on the same PR replaces its unreviewed decisions instead of duplicating them.
         conn.execute(
             "DELETE FROM decisions WHERE repo = %s AND pr_number = %s AND status = 'proposed'",
@@ -138,6 +140,15 @@ def extract_pr(repo: str, number: int, show: bool = False) -> int:
     # Guard against made-up citations: keep only decisions that point to a real comment.
     valid = [d for d in decisions if d.source_comment_id in by_id]
     dropped = len(decisions) - len(valid)
+     # The same rule stated twice (e.g. a repeated comment) should be stored once.
+    seen: set[str] = set()
+    unique = []
+    for d in valid:
+        key = d.statement.strip().lower().rstrip(".")
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+    valid = unique
 
     embeddings = []
     if valid:
