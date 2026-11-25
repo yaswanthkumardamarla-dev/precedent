@@ -1,4 +1,5 @@
 // Server-side access to the Precedent FastAPI backend. Only import this from Server Components and Server Actions.
+import { connection } from "next/server";
 
 export const BACKEND_URL = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
 
@@ -59,6 +60,7 @@ export type WebhookEvent = {
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  await connection(); // always live data, fetched per request; never at build time
   const token = process.env.BACKEND_API_TOKEN;
   if (!token) throw new Error("BACKEND_API_TOKEN is not set, so the dashboard can't call the backend.");
   let response: Response;
