@@ -26,6 +26,9 @@ services:
       # Must stay the same model that made the stored decisions' embeddings, or search stops matching.
       - key: EMBEDDING_MODEL
         value: gemini-embedding-001
+      # Shown read-only to visitors who aren't signed in.
+      - key: DEMO_REPOS
+        value: yaswanthkumardamarla-dev/precedent-sandbox
       - key: API_TOKEN  # generated; copy it to Vercel as BACKEND_API_TOKEN
         generateValue: true
       # Render asks for these when the Blueprint is created.

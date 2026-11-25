@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from app import config  # loads backend/.env
 from app.api import router as api_router
-from app.jobs import run_job
+from app.jobs import admit, forget_owner, forget_repos, run_job
 from app.redeliver import start_background_sweeps
 
 WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
@@ -79,6 +79,14 @@ def plan_job(event: str, payload: dict) -> tuple[str, int] | None:
     return None
 
 
+
+def repos_removed(event: str, payload: dict) -> list[str]:
+    """Repositories Precedent was just removed from (their data should be deleted)."""
+    if event == "installation_repositories" and payload.get("action") == "removed":
+        return [r["full_name"] for r in payload.get("repositories_removed") or []]
+    return []
+
+
 @app.post("/webhooks/github")
 async def github_webhook(
     request: Request,
@@ -92,26 +100,36 @@ async def github_webhook(
     payload = json.loads(body)
 
     action = payload.get("action")
-    repo = (payload.get("repository") or {}).get("full_name")
+    repository = payload.get("repository") or {}
+    repo = repository.get("full_name")
+    private = bool(repository.get("private"))
+
+    # Precedent removed from some repositories, or uninstalled from an account: forget their data.
+    forget_repos(repos_removed(x_github_event, payload))
+    if x_github_event == "installation" and action == "deleted":
+        forget_owner(((payload.get("installation") or {}).get("account") or {}).get("login"))
+
     planned = plan_job(x_github_event, payload)
     job = planned[0] if planned else None
 
     with psycopg.connect(config.DATABASE_URL) as conn:
+        status, note = admit(conn, repo, private) if planned else ("ignored", None)
         conn.execute(
             """
-            INSERT INTO webhook_events (delivery_id, event, action, repo, payload, job, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO webhook_events (delivery_id, event, action, repo, payload, job, status, error)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (delivery_id) DO UPDATE
-                SET job = EXCLUDED.job, status = EXCLUDED.status, error = NULL, finished_at = NULL,
+                SET job = EXCLUDED.job, status = EXCLUDED.status, error = EXCLUDED.error, finished_at = NULL,
                     attempts = 0  -- a resend from GitHub gets a fresh set of retries
             """,
-            (x_github_delivery, x_github_event, action, repo, Jsonb(payload),
-             job, "queued" if planned else "ignored"),
+            # Nothing from a private repository's payload is kept.
+            (x_github_delivery, x_github_event, action, repo, Jsonb({} if private else payload),
+             job, status, note),
         )
 
-    print(f"[webhook] {x_github_event} {action or ''} {repo or ''} -> {job or 'ignored'}", flush=True)
+    print(f"[webhook] {x_github_event} {action or ''} {repo or ''} -> {job or 'ignored'} ({status})", flush=True)
 
-    if planned:
+    if status == "queued":
         background_tasks.add_task(run_job, x_github_delivery, job, repo, planned[1])
 
-    return {"ok": True, "job": job}
+    return {"ok": True, "job": job, "status": status}

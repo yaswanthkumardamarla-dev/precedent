@@ -1,5 +1,8 @@
 // Server-side access to the Precedent FastAPI backend. Only import this from Server Components and Server Actions.
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
+
+import { getSession } from "@/lib/session";
 
 export const BACKEND_URL = (process.env.BACKEND_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 
@@ -15,6 +18,14 @@ export type Summary = {
   repos: string[];
 };
 
+export type Me = {
+  login: string | null;
+  demo: boolean;
+  repos: { name: string; private: boolean; can_write: boolean }[];
+  install_url: string;
+  limits: { repo_daily_jobs: number; owner_daily_jobs: number };
+};
+
 export type Decision = {
   id: number;
   repo: string;
@@ -28,6 +39,7 @@ export type Decision = {
   status: DecisionStatus;
   created_at: string;
   conflict_count: number;
+  can_edit: boolean;
 };
 
 export type Conflict = {
@@ -52,7 +64,7 @@ export type WebhookEvent = {
   action: string | null;
   repo: string | null;
   job: "check" | "extract" | null;
-  status: "queued" | "running" | "done" | "failed" | "ignored" | null;
+  status: "queued" | "running" | "done" | "failed" | "ignored" | "skipped" | "limited" | null;
   error: string | null;
   attempts: number;
   received_at: string;
@@ -64,16 +76,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   await connection(); // always live data, fetched per request; never at build time
   const token = process.env.BACKEND_API_TOKEN;
   if (!token) throw new Error("BACKEND_API_TOKEN is not set, so the dashboard can't call the backend.");
+  // The backend checks the signed-in person's GitHub token itself; without one it serves the public demo.
+  const session = await getSession();
   let response: Response;
   try {
     response = await fetch(`${BACKEND_URL}${path}`, {
       cache: "no-store",
       ...init,
-      headers: { ...init?.headers, Authorization: `Bearer ${token}` },
+      headers: {
+        ...init?.headers,
+        Authorization: `Bearer ${token}`,
+        ...(session ? { "X-GitHub-Token": session.token } : {}),
+      },
     });
   } catch {
     throw new Error(`Can't reach the Precedent backend at ${BACKEND_URL}. Is it running?`);
   }
+  if (response.status === 401 && session) redirect("/login?expired=1"); // GitHub token revoked or expired
+  if (response.status === 403) throw new Error("You need write access to this repository on GitHub to change it.");
   if (!response.ok) {
     throw new Error(`Backend returned ${response.status} for ${path}: ${await response.text()}`);
   }
@@ -89,10 +109,13 @@ function query(params: Record<string, string | undefined>): string {
 
 export const getSummary = () => request<Summary>("/api/summary");
 
-export const getDecisions = (filters: { repo?: string; status?: DecisionStatus; q?: string } = {}) =>
+/** Who is viewing and which repositories they have. refresh asks GitHub again (e.g. right after installing). */
+export const getMe = (refresh = false) => request<Me>(`/api/me${refresh ? "?refresh=true" : ""}`);
+
+export const getDecisions = (filters: { status?: DecisionStatus; q?: string } = {}) =>
   request<Decision[]>(`/api/decisions${query(filters)}`);
 
-export const getConflicts = (repo?: string) => request<Conflict[]>(`/api/conflicts${query({ repo })}`);
+export const getConflicts = () => request<Conflict[]>("/api/conflicts");
 
 export const getEvents = (limit = 50) => request<WebhookEvent[]>(`/api/events?limit=${limit}`);
 

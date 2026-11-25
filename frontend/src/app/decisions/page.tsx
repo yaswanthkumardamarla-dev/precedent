@@ -74,7 +74,7 @@ async function FilteredDecisions({ searchParams }: { searchParams: PageProps<"/d
                       {d.confidence != null && <> · confidence {Math.round(d.confidence * 100)}%</>}
                     </p>
                   </div>
-                  <DecisionActions id={d.id} status={d.status} />
+                  {d.can_edit && <DecisionActions id={d.id} status={d.status} />}
                 </div>
               </Card>
             </li>

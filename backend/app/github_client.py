@@ -127,3 +127,15 @@ def upsert_pr_comment(
         return None
     _check(response)
     return response.json()["html_url"]
+
+_slug: str | None = None
+
+
+def app_slug() -> str:
+    """The App's URL name on GitHub, as in github.com/apps/<slug>. Asked once, then remembered."""
+    global _slug
+    if _slug is None:
+        response = httpx.get(f"{API}/app", headers={**HEADERS, "Authorization": f"Bearer {_app_jwt()}"})
+        _check(response)
+        _slug = response.json()["slug"]
+    return _slug

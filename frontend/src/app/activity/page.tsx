@@ -70,7 +70,10 @@ async function Events() {
                     {took && e.job && <span className="text-xs text-zinc-400">{took}s</span>}
                     {e.attempts > 1 && <span className="text-xs text-zinc-400">attempt {e.attempts}</span>}
                   </div>
-                  {e.error && (
+                  {e.error && (e.status === "skipped" || e.status === "limited") && (
+                    <p className="mt-1 max-w-xs text-xs text-zinc-500">{e.error}</p>
+                  )}
+                  {e.error && e.status !== "skipped" && e.status !== "limited" && (
                     <details className="mt-2">
                       <summary className="cursor-pointer text-xs text-red-700 dark:text-red-400">Show error</summary>
                       <pre className="mt-1 max-w-xl overflow-x-auto whitespace-pre-wrap rounded bg-red-50 p-2 font-mono text-xs text-red-900 dark:bg-red-950 dark:text-red-200">
