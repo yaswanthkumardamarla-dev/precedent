@@ -91,7 +91,7 @@ def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> int:
     """Store decisions; returns how many were skipped because they were already reviewed."""
     skipped = 0
     with psycopg.connect(config.DATABASE_URL) as conn:
-        # NEW: several webhook jobs for the same PR can run at once; make them take turns.
+        # Several webhook jobs for the same PR can run at once; make them take turns.
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{repo}#{number}",))
         # Re-running on the same PR replaces its unreviewed decisions instead of duplicating them.
         conn.execute(

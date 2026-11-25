@@ -9,6 +9,7 @@ const STATUS_STYLES: Record<string, string> = {
   done: "bg-emerald-50 text-emerald-800 ring-emerald-600/20 dark:bg-emerald-400/10 dark:text-emerald-300",
   failed: "bg-red-50 text-red-800 ring-red-600/20 dark:bg-red-400/10 dark:text-red-300",
   queued: "bg-sky-50 text-sky-800 ring-sky-600/20 dark:bg-sky-400/10 dark:text-sky-300",
+  running: "bg-sky-50 text-sky-800 ring-sky-600/20 dark:bg-sky-400/10 dark:text-sky-300",
   ignored: "bg-zinc-100 text-zinc-500 ring-zinc-500/20 dark:bg-zinc-400/10 dark:text-zinc-500",
 };
 

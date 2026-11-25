@@ -33,7 +33,7 @@ async function Stats() {
       label: "Failed jobs",
       value: s.failed_jobs_7d,
       href: "/activity",
-      hint: s.queued_jobs ? `${s.queued_jobs} queued` : "last 7 days",
+      hint: s.queued_jobs ? `${s.queued_jobs} in progress` : "last 7 days",
     },
   ];
   return (

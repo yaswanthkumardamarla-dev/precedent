@@ -68,6 +68,7 @@ async function Events() {
                   <div className="flex items-center gap-2">
                     <Badge status={e.status} />
                     {took && e.job && <span className="text-xs text-zinc-400">{took}s</span>}
+                    {e.attempts > 1 && <span className="text-xs text-zinc-400">attempt {e.attempts}</span>}
                   </div>
                   {e.error && (
                     <details className="mt-2">

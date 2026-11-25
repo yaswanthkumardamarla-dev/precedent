@@ -43,7 +43,7 @@ def summary():
     [jobs] = _query(
         """
         SELECT count(*) FILTER (WHERE status = 'failed') AS failed,
-               count(*) FILTER (WHERE status = 'queued') AS queued
+               count(*) FILTER (WHERE status IN ('queued', 'running')) AS queued
         FROM webhook_events
         WHERE received_at > now() - interval '7 days'
         """
@@ -121,7 +121,7 @@ def list_events(limit: int = 50):
     """Recent webhook deliveries and what Precedent did with them (without the raw payload)."""
     return _query(
         """
-        SELECT id, delivery_id, event, action, repo, job, status, error, received_at, finished_at,
+        SELECT id, delivery_id, event, action, repo, job, status, error, attempts, received_at, finished_at,
                COALESCE(payload->'pull_request'->>'number', payload->'issue'->>'number')::int AS pr_number
         FROM webhook_events
         ORDER BY received_at DESC

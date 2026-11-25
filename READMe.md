@@ -128,7 +128,7 @@ GitHub Actions runs both on every push to `main` and on every pull request.
 None of them needs a credit card. Set them up in this order:
 
 1. **Database (Neon):** sign up and create a project. Copy its connection string (it starts with `postgresql://` and ends with `sslmode=require`). pgvector is built in, and the tables are created when the backend first starts.
-2. **Backend (Render):** choose **New → Blueprint**, then pick this repository. Fill in what it asks for: `DATABASE_URL` (the Neon string), `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_CLIENT_ID`, and `GEMINI_API_KEY`. Leave `GITHUB_PRIVATE_KEY` empty. Instead, open the service's **Environment → Secret Files**, add a file named `github-app.pem`, and paste the full contents of the `.pem` file. When the service starts, its log shows `[startup] GitHub App key: OK` if the key loaded. When it's deployed, note two things on the service's page: its URL (for example `https://precedent-backend.onrender.com`), and under **Environment**, the generated `API_TOKEN`. Opening `<URL>/health` should show `"status": "ok"`.
+2. **Backend (Render):** choose **New → Blueprint**, then pick this repository. Fill in what it asks for: `DATABASE_URL` (the Neon string), `GITHUB_WEBHOOK_SECRET`, `GITHUB_CLIENT_ID`, and `GEMINI_API_KEY`. Then open the service's **Environment → Secret Files**, add a file named `github-app.pem`, and paste the full contents of the `.pem` file. When the service starts, its log shows `[startup] GitHub App key: OK` if the key loaded. When it's deployed, note two things on the service's page: its URL (for example `https://precedent-backend.onrender.com`), and under **Environment**, the generated `API_TOKEN`. Opening `<URL>/health` should show `"status": "ok"`.
 3. **Dashboard (Vercel):** choose **Add New → Project** and import this repository. Set **Root Directory** to `frontend`; Vercel detects Next.js by itself. Under **Environment Variables**, add:
    - `BACKEND_URL`: the backend URL from step 2, with no trailing slash
    - `BACKEND_API_TOKEN`: the `API_TOKEN` value from step 2
@@ -139,7 +139,7 @@ None of them needs a credit card. Set them up in this order:
 
 What "free" costs you:
 
-- **The backend sleeps after 15 idle minutes.** A webhook that arrives while it sleeps times out at GitHub. GitHub never retries on its own, so once the backend is awake it asks GitHub to resend any webhooks it missed (`app/redeliver.py`, every 5 minutes). Nothing is lost, but a PR comment may arrive a minute or two late.
+- **The backend sleeps after 15 idle minutes.** A webhook that arrives while it sleeps times out at GitHub. GitHub never retries on its own, so once the backend is awake it asks GitHub to resend any webhooks it missed (`app/redeliver.py`, every 5 minutes). Nothing is lost, but a PR comment may arrive a minute or two late. The same pass also re-runs jobs that failed, for example because Gemini was briefly unavailable, or that were cut off by a restart. Each job gets up to 3 attempts within 6 hours.
 - **The first dashboard load after a quiet stretch can take up to a minute,** because the dashboard waits for the backend to wake. The dashboard itself doesn't sleep.
 - To remove both delays, move the backend to Render's always-on Starter plan ($7/month).
 
@@ -151,9 +151,8 @@ To check it: open a PR in a watched repo. Within a minute or two it shows up und
 | --- | --- | --- |
 | `DATABASE_URL` | yes | |
 | `GITHUB_WEBHOOK_SECRET` | yes | |
-| `GITHUB_APP_ID`, `GITHUB_CLIENT_ID` | yes | |
+| `GITHUB_CLIENT_ID` | yes | The App's Client ID, used to sign in to GitHub as the App |
 | `GITHUB_PRIVATE_KEY_PATH` | | `github-app.pem` (relative to `backend/`) |
-| `GITHUB_PRIVATE_KEY` | | Key text; used only when the file at `GITHUB_PRIVATE_KEY_PATH` doesn't exist |
 | `GEMINI_API_KEY` | yes | |
 | `GEMINI_MODEL` | | `gemini-3.5-flash-lite` |
 | `EMBEDDING_MODEL` | | `gemini-embedding-001` |

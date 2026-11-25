@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import os
-import traceback
 from contextlib import asynccontextmanager
 
 import psycopg
@@ -12,12 +11,10 @@ from psycopg.types.json import Jsonb
 
 from app import config  # loads backend/.env
 from app.api import router as api_router
-from app.check import check_pr
-from app.extract import extract_pr
+from app.jobs import run_job
 from app.redeliver import start_background_sweeps
 
 WEBHOOK_SECRET = os.environ["GITHUB_WEBHOOK_SECRET"]
-
 
 
 @asynccontextmanager
@@ -82,30 +79,6 @@ def plan_job(event: str, payload: dict) -> tuple[str, int] | None:
     return None
 
 
-def set_status(delivery_id: str, status: str, error: str | None = None) -> None:
-    with psycopg.connect(config.DATABASE_URL) as conn:
-        conn.execute(
-            "UPDATE webhook_events SET status = %s, error = %s, finished_at = now() WHERE delivery_id = %s",
-            (status, error, delivery_id),
-        )
-
-
-def run_job(delivery_id: str, job: str, repo: str, number: int) -> None:
-    """Runs in the background after GitHub has already received its reply."""
-    print(f"[job] {job} {repo}#{number} starting", flush=True)
-    try:
-        if job == "check":
-            check_pr(repo, number, post=True)
-        else:
-            extract_pr(repo, number)
-        set_status(delivery_id, "done")
-        print(f"[job] {job} {repo}#{number} done", flush=True)
-    except Exception:
-        error = traceback.format_exc()
-        print(f"[job] {job} {repo}#{number} FAILED\n{error}", flush=True)
-        set_status(delivery_id, "failed", error)
-
-
 @app.post("/webhooks/github")
 async def github_webhook(
     request: Request,
@@ -129,7 +102,8 @@ async def github_webhook(
             INSERT INTO webhook_events (delivery_id, event, action, repo, payload, job, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (delivery_id) DO UPDATE
-                SET job = EXCLUDED.job, status = EXCLUDED.status, error = NULL, finished_at = NULL
+                SET job = EXCLUDED.job, status = EXCLUDED.status, error = NULL, finished_at = NULL,
+                    attempts = 0  -- a resend from GitHub gets a fresh set of retries
             """,
             (x_github_delivery, x_github_event, action, repo, Jsonb(payload),
              job, "queued" if planned else "ignored"),
