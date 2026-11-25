@@ -28,3 +28,14 @@ CREATE TABLE IF NOT EXISTS decisions (
 
 CREATE INDEX IF NOT EXISTS decisions_embedding_idx
     ON decisions USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS conflicts (
+    id          BIGSERIAL PRIMARY KEY,
+    repo        TEXT NOT NULL,
+    pr_number   INT NOT NULL,
+    decision_id BIGINT NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    explanation TEXT NOT NULL,
+    evidence    TEXT NOT NULL DEFAULT '',
+    confidence  REAL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
