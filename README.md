@@ -109,8 +109,8 @@ flowchart LR
 ### 3. Checking a pull request: retrieve, then judge ([`check.py`](backend/app/check.py))
 
 1. Fetch the PR and its changed files: at most 20 files, and at most 4,000 characters of diff per file.
-2. **Retrieve.** For each changed file, embed a query made of the PR title, the file name and its *added* lines (task type `RETRIEVAL_QUERY`). Then search the decisions with pgvector's HNSW index by cosine distance: the 10 nearest per file, from the same repository, leaving out retired decisions and decisions made in this same PR. Keep the 10 closest overall.
-3. **Judge.** Send Gemini the diff and only those candidate decisions. The prompt favours precision: only added lines count, a related decision is not a conflict, and *"a false alarm is worse than a miss"*.
+2. **Retrieve.** Embed search queries (task type `RETRIEVAL_QUERY`): one per changed file, made of the PR title, the file name and its *added* lines, plus one per added line (up to 50), because a whole-file query blends everything the file does and can bury a single `print(...)`. Search the decisions with pgvector's HNSW index by cosine distance: the 10 nearest per query, from the same repository, leaving out retired decisions and decisions made in this same PR. Keep the 10 closest overall.
+3. **Judge.** Send Gemini the diff and only those candidate decisions. For each decision that might be broken, the model quotes the added lines and explains, and only then gives a yes-or-no verdict; only the yes answers are kept. Asking for the verdict last stops it from committing to a conflict before it has reasoned. The prompt favours precision: only added lines count, a related decision is not a conflict, and *"a false alarm is worse than a miss"*.
 4. Again, drop any conflict that cites a decision the model wasn't given.
 5. Replace the PR's stored conflicts, and **create or update one comment** on the PR. The comment is found again by a hidden HTML marker. A new comment is only posted when there are conflicts, and an existing one is edited to ✅ once they're fixed.
 
@@ -263,7 +263,7 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest -q tests
 cd frontend && npm run lint && npm run build
 ```
 
-There are 35 backend tests. They cover:
+There are 38 backend tests. They cover:
 
 - which GitHub events start which job, including that drafts and bots are ignored
 - webhook signature checks
@@ -275,6 +275,7 @@ There are 35 backend tests. They cover:
 - the daily limits
 - that removing or uninstalling the App deletes data
 - which missed webhooks are chosen for resending
+- the search for related decisions, against real pgvector
 - that the evaluation cases are well-formed, and that they're scored correctly (no Gemini calls)
 
 The database tests use a separate `precedent_test` database, never your real one. They are skipped when that database isn't reachable.
@@ -331,11 +332,12 @@ Mean of 3 runs each, with the range when runs disagreed:
 | Conflict retrieval recall | 0.89 | **0.94** |
 | Clean PRs left alone | 0.96 (0.88–1.00) | 0.87 (0.86–0.88) |
 
-The latest run's failures are in [`evals/RESULTS.md`](backend/evals/RESULTS.md). Three are still open:
+The second measurement's failures are in [`evals/RESULTS.md`](backend/evals/RESULTS.md). Two of them led to two more fixes:
 
-- **The fix cost some precision.** In chk-02, an endpoint with full type hints is flagged for missing type hints in every run. With 10 candidates instead of 5, the model makes this false alarm consistently.
-- **Retrieval still misses some decisions.** In chk-01, a `print` call isn't caught, because "Use the logging module instead of print" ranks 11th of 20 and isn't shown to the model. All 20 decisions fall between distance 0.36 and 0.49: one query per file blends everything that file does. Smaller queries (one per hunk) or matching on keywords like `print` would separate them better.
-- **Judgement varies between runs.** In chk-15, an edit to a released migration was missed in 1 run of 3.
+- **A false alarm on chk-02, an endpoint with full type hints, in every run.** The model's own explanation ended with "None of the decisions are violated": the response format had it commit to a conflict before reasoning about it. Now each entry gives the evidence and the reasoning first, and a yes-or-no `breaks_decision` verdict last, and only the yes answers are kept.
+- **A miss on chk-01: a `print` call wasn't caught,** because "Use the logging module instead of print" ranked 11th of 20. All 20 decisions fell between distance 0.36 and 0.49: one query per file blends everything that file does. Two things didn't work. Windows of 3 or 5 lines fixed this miss but caused another, and keyword matching was too noisy (words like `app`, `json` and `log` matched rules in clean PRs). What did work: each added line now gets its own query too. Retrieval recall on the set went from 17/18 to 18/18, and the rule now ranks 7th.
+
+Run on their own, both cases now pass in 3 of 3 runs. **The full 3-run measurement with these two fixes is still to come.** The free tier's daily limit of 1,000 embedding requests ran out before it could finish, and the table above doesn't include them yet. Still open: chk-15, an edit to a released migration, was missed in 1 run of 3.
 
 **Caveats**
 

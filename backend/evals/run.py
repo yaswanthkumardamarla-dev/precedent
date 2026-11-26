@@ -125,6 +125,10 @@ class Unavailable(Exception):
     """Gemini kept failing on one case. The case is reported and left out of the scores."""
 
 
+class QuotaUsedUp(Exception):
+    """A daily quota ran out: nothing more can run today, so the measurement stops."""
+
+
 def patient(call, attempts: int = 3, pause: int = 90):
     """Make a model call, pausing longer between tries than production does (the free tier is often busy)."""
     for attempt in range(attempts):
@@ -132,6 +136,8 @@ def patient(call, attempts: int = 3, pause: int = 90):
             return call()
         except Exception as error:  # production's own short retries are used up, or the answer wasn't valid
             reason = str(error).splitlines()[0][:100]
+            if "PerDay" in str(error):  # waiting minutes won't help
+                raise QuotaUsedUp(reason) from error
             if attempt == attempts - 1:
                 raise Unavailable(reason) from error
             print(f"    model call failed ({reason}); trying again in {pause}s", flush=True)
@@ -320,12 +326,24 @@ def main() -> None:
 
     start = time.monotonic()
     results: dict[str, list[tuple[Score, dict]]] = {}
+    stopped = ""
     for n in range(args.repeat):
         for name in chosen:
             count, run_suite = suites[name]
-            if count:
+            if count and not stopped:
                 print(f"{name}: {count} cases" + (f", run {n + 1} of {args.repeat}" if args.repeat > 1 else ""))
-                results.setdefault(name, []).append(run_suite())
+                try:
+                    scored = run_suite()
+                except QuotaUsedUp as error:
+                    stopped = f"{name}, run {n + 1} of {args.repeat}: Gemini's daily quota is used up ({error})"
+                    continue
+                results.setdefault(name, []).append(scored)
+    if stopped:
+        print(f"\nStopped at {stopped}.")
+        if results:
+            print("Runs finished before that:\n\n" + report(
+                results, {name: suites[name][0] for name in results}, time.monotonic() - start))
+        raise SystemExit("Not saved: the measurement is incomplete. Run it again once the quota resets.")
     if not results:
         raise SystemExit("No cases matched.")
 

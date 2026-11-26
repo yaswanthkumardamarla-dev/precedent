@@ -107,3 +107,16 @@ def test_a_case_gives_up_after_repeated_model_failures(monkeypatch):
         raise AssertionError("expected Unavailable")
     except run.Unavailable as error:
         assert "division by zero" in str(error)
+
+
+def test_a_used_up_daily_quota_stops_at_once(monkeypatch):
+    monkeypatch.setattr(run.time, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("should not wait")))
+
+    def quota():
+        raise RuntimeError("429 RESOURCE_EXHAUSTED ... 'quotaId': 'EmbedContentRequestsPerDayPerUserPerProjectPerModel'")
+
+    try:
+        run.patient(quota)
+        raise AssertionError("expected QuotaUsedUp")
+    except run.QuotaUsedUp:
+        pass
