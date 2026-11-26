@@ -18,8 +18,10 @@ from app.llm import embed_queries, find_conflicts
 MARKER = "<!-- precedent:conflict-check -->"  # hidden tag so we can find and edit our own comment
 MAX_FILES = 20            # files looked at per PR
 MAX_PATCH_CHARS = 4000    # diff text per file, so one huge file can't crowd out the rest
-TOP_K = 5                 # closest decisions fetched per changed file
 MAX_CANDIDATES = 10       # decisions shown to the model
+# Closest decisions fetched per changed file. As many as the model is shown, so a one-file PR gets a full
+# set too (with 5, the eval set showed rules ranked 6th-10th being missed).
+TOP_K = MAX_CANDIDATES
 
 
 def describe_change(pr: dict, files: list[dict]) -> tuple[str, list[str]]:
