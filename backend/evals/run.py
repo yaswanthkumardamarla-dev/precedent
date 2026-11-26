@@ -69,6 +69,7 @@ class Score:
     fp: int = 0
     fn: int = 0
     failures: list[tuple[str, str]] = field(default_factory=list)  # (case id, what went wrong)
+    unavailable: list[str] = field(default_factory=list)  # cases not scored because Gemini kept failing
 
     @property
     def precision(self) -> float:
@@ -118,6 +119,30 @@ def nearest(query: list[float], pool: list[dict], vectors: list[list[float]], k:
     return ranked[:k]
 
 
+# ---------- calling the model ----------
+
+class Unavailable(Exception):
+    """Gemini kept failing on one case. The case is reported and left out of the scores."""
+
+
+def patient(call, attempts: int = 3, pause: int = 90):
+    """Make a model call, pausing longer between tries than production does (the free tier is often busy)."""
+    for attempt in range(attempts):
+        try:
+            return call()
+        except Exception as error:  # production's own short retries are used up, or the answer wasn't valid
+            reason = str(error).splitlines()[0][:100]
+            if attempt == attempts - 1:
+                raise Unavailable(reason) from error
+            print(f"    model call failed ({reason}); trying again in {pause}s", flush=True)
+            time.sleep(pause)
+
+
+def unavailable(score: Score, case: dict, error: Unavailable) -> None:
+    score.unavailable.append(case["id"])
+    print(f"  SKIP  {case['id']}  model unavailable: {error}", flush=True)
+
+
 # ---------- the two suites ----------
 
 def run_extraction(cases: list[dict], verbose: bool) -> tuple[Score, dict]:
@@ -126,11 +151,14 @@ def run_extraction(cases: list[dict], verbose: bool) -> tuple[Score, dict]:
     score, citations_right, traps = Score(), 0, [0, 0]
     for case in cases:
         transcript, by_id = build_transcript(to_discussion(case["comments"]))
-        predicted, _ = clean_decisions(extract_decisions(transcript), by_id)
         expected = case.get("expect") or []
-
-        statements = [e["statement"] for e in expected] + [p.statement for p in predicted]
-        vectors = embed_documents(statements) if expected and predicted else []
+        try:
+            predicted, _ = clean_decisions(patient(lambda: extract_decisions(transcript)), by_id)
+            statements = [e["statement"] for e in expected] + [p.statement for p in predicted]
+            vectors = patient(lambda: embed_documents(statements)) if expected and predicted else []
+        except Unavailable as error:
+            unavailable(score, case, error)
+            continue
         exp_v, pred_v = vectors[: len(expected)], vectors[len(expected):]
         similarity = [[cosine(e, p) for p in pred_v] for e in exp_v]
         matched = match_statements(similarity)
@@ -179,15 +207,19 @@ def run_conflicts(data: dict, verbose: bool) -> tuple[Score, dict]:
     pool = [{"id": n, "key": d["key"], "statement": d["statement"], "rationale": d.get("rationale", ""),
              "scope": d.get("scope", "")} for n, d in enumerate(data["decisions"], start=1)]
     by_key = {d["key"]: d for d in pool}
-    pool_vectors = embed_documents([d["statement"] for d in pool])
+    pool_vectors = patient(lambda: embed_documents([d["statement"] for d in pool]))
 
     score, retrieved, wanted, alarms = Score(), 0, 0, [0, 0]
     for case in data["cases"]:
         change, queries = describe_change(*as_pr(case))
-        candidates = closest_overall([nearest(q, pool, pool_vectors) for q in embed_queries(queries)])
+        try:
+            query_vectors = patient(lambda: embed_queries(queries))
+            candidates = closest_overall([nearest(q, pool, pool_vectors) for q in query_vectors])
+            conflicts = patient(lambda: find_conflicts(change, decisions_as_text(candidates)))
+        except Unavailable as error:
+            unavailable(score, case, error)
+            continue
         candidate_ids = {d["id"] for d in candidates}
-
-        conflicts = find_conflicts(change, decisions_as_text(candidates))
         predicted = {c.decision_id for c in conflicts if c.decision_id in candidate_ids}
         expected = {by_key[k]["id"] for k in case.get("expect") or []}
         names = {d["id"]: d["key"] for d in pool}
@@ -262,6 +294,9 @@ def report(results: dict[str, list[tuple[Score, dict]]], cases: dict[str, int], 
                 first += f"  [failed in {len(texts)} of {runs} runs]"
             lines += [first, rest]
         lines.append("```")
+    skipped = [case_id for scored in results.values() for score, _ in scored for case_id in score.unavailable]
+    if skipped:
+        lines += ["", f"Not scored, because Gemini was unavailable: {', '.join(skipped)}."]
     return "\n".join(lines)
 
 

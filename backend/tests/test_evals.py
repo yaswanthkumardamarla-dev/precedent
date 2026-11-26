@@ -63,3 +63,21 @@ def test_nearest_ranks_by_cosine_distance():
     ranked = run.nearest([1, 0.1], pool, vectors, k=2)
     assert [d["id"] for d in ranked] == [1, 3]
     assert abs(ranked[0]["distance"] - (1 - run.cosine([1, 0.1], [1, 0]))) < 1e-9
+
+
+def test_a_case_gives_up_after_repeated_model_failures(monkeypatch):
+    monkeypatch.setattr(run.time, "sleep", lambda s: None)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("503 UNAVAILABLE")
+        return "ok"
+
+    assert run.patient(flaky) == "ok" and len(calls) == 3
+    try:
+        run.patient(lambda: 1 / 0, attempts=2)
+        raise AssertionError("expected Unavailable")
+    except run.Unavailable as error:
+        assert "division by zero" in str(error)
