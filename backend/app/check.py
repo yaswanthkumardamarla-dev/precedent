@@ -6,6 +6,7 @@ Usage (from the backend folder):
     python -m app.check OWNER/REPO PR_NUMBER --show    # also print what is sent to the model
 """
 import argparse
+import re
 import time
 
 import psycopg
@@ -22,20 +23,26 @@ MAX_CANDIDATES = 10       # decisions shown to the model
 # Closest decisions fetched per changed file. As many as the model is shown, so a one-file PR gets a full
 # set too (with 5, the eval set showed rules ranked 6th-10th being missed).
 TOP_K = MAX_CANDIDATES
+# Added lines searched on their own, besides each whole file. A file's query blends everything the file does,
+# so one `print(...)` line can't pull in "use logging instead of print"; a query for that line alone can.
+# With up to 20 file queries this stays under Gemini's limit of 100 texts per embedding request.
+MAX_LINE_QUERIES = 50
 
 
 def describe_change(pr: dict, files: list[dict]) -> tuple[str, list[str]]:
-    """The PR as text for the model, plus one search query per changed file."""
+    """The PR as text for the model, plus search queries: one per changed file, then one per added line."""
     parts = [f"Title: {pr['title']}", f"Description: {pr.get('body') or '(none)'}", ""]
-    queries: list[str] = []
+    file_queries: list[str] = []
+    line_queries: dict[str, None] = {}  # a dict keeps the order and drops repeated lines
     for f in files[:MAX_FILES]:
         patch = (f.get("patch") or "(no text diff)")[:MAX_PATCH_CHARS]
         parts.append(f"### {f['filename']} ({f['status']})\n{patch}\n")
-        added = "\n".join(
-            line[1:] for line in patch.splitlines() if line.startswith("+") and not line.startswith("+++")
-        )
-        queries.append(f"{pr['title']}\nFile: {f['filename']}\n{added}"[:2000])
-    return "\n".join(parts), queries
+        added = [line[1:] for line in patch.splitlines() if line.startswith("+") and not line.startswith("+++")]
+        file_queries.append(f"{pr['title']}\nFile: {f['filename']}\n" + "\n".join(added)[:2000])
+        for line in added:
+            if len(re.sub(r"\W", "", line)) >= 4:  # skip blank lines and lone brackets
+                line_queries.setdefault(f"File: {f['filename']}\n{line.strip()}"[:500])
+    return "\n".join(parts), file_queries + list(line_queries)[:MAX_LINE_QUERIES]
 
 
 def closest_overall(per_query: list[list[dict]]) -> list[dict]:
@@ -49,7 +56,7 @@ def closest_overall(per_query: list[list[dict]]) -> list[dict]:
 
 
 def find_candidates(repo: str, number: int, vectors: list[list[float]]) -> list[dict]:
-    """For each changed file, find the closest past decisions; keep the closest overall."""
+    """For each search query, find the closest past decisions; keep the closest overall."""
     per_query: list[list[dict]] = []
     with psycopg.connect(config.DATABASE_URL) as conn:
         for vector in vectors:

@@ -26,8 +26,34 @@ def test_conflict_cases_are_well_formed():
     for case in cases:
         assert set(case["expect"]) <= set(keys), case["id"]
         change, queries = describe_change(*run.as_pr(case))
-        assert len(queries) == len(case["files"]), case["id"]
+        assert len(queries) > len(case["files"]), case["id"]  # a query per file, then per added line
     assert sum(not c["expect"] for c in cases) >= len(cases) // 3
+
+
+def test_each_added_line_is_also_searched_once():
+    pr = {"title": "Add endpoint", "body": ""}
+    files = [
+        {"filename": "a.py", "status": "modified",
+         "patch": "@@ -1,2 +1,5 @@\n-old_call()\n+print('x')\n+    }\n+\n+print('x')\n context"},
+        {"filename": "b.py", "status": "added", "patch": "@@ -0,0 +1 @@\n+import requests"},
+    ]
+    _, queries = describe_change(pr, files)
+    assert queries[0].startswith("Add endpoint\nFile: a.py\n") and "old_call" not in queries[0]
+    assert queries[1].startswith("Add endpoint\nFile: b.py\n")
+    # removed lines, blank lines, lone brackets and repeats get no query of their own
+    assert queries[2:] == ["File: a.py\nprint('x')", "File: b.py\nimport requests"]
+
+
+def test_conflicts_the_model_cleared_are_dropped(monkeypatch):
+    from app import llm
+    checked = llm.ConflictResult(conflicts=[
+        llm.Conflict(decision_id=1, evidence="a.py: print(1)", explanation="uses print", breaks_decision=True,
+                     confidence=0.9),
+        llm.Conflict(decision_id=2, evidence="a.py: def f(x: int) -> dict", explanation="fully typed",
+                     breaks_decision=False, confidence=0.2),
+    ])
+    monkeypatch.setattr(llm, "_generate", lambda prompt, schema: checked)
+    assert [c.decision_id for c in llm.find_conflicts("change", "decisions")] == [1]
 
 
 def test_replies_join_their_thread():
