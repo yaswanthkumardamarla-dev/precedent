@@ -176,7 +176,7 @@ async function Stats() {
   const s = await getSummary();
   const stats = [
     { label: "Proposed decisions", value: s.decisions.proposed, href: "/decisions?status=proposed", hint: "awaiting review" },
-    { label: "Accepted decisions", value: s.decisions.accepted, href: "/decisions?status=accepted", hint: "enforced" },
+    { label: "Accepted decisions", value: s.decisions.accepted, href: "/decisions?status=accepted", hint: "confirmed by a maintainer" },
     { label: "Conflicts", value: s.conflicts, href: "#flagged", hint: `across ${s.prs_with_conflicts} PR(s)` },
     {
       label: "Failed jobs",

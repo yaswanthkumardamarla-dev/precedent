@@ -15,8 +15,8 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
       <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <h1 className="text-lg font-semibold">Sign in to Precedent</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Use your GitHub account. Precedent only reads who you are and which repositories you&apos;ve installed it
-          on; it can&apos;t act as you.
+          Use your GitHub account. Precedent uses your sign-in only to read who you are and which repositories
+          you&apos;ve installed it on.
         </p>
         <Suspense>
           <LoginForm searchParams={searchParams} />
