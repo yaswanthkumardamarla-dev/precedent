@@ -56,30 +56,33 @@ def closest_overall(per_query: list[list[dict]]) -> list[dict]:
 
 
 def find_candidates(repo: str, number: int, vectors: list[list[float]]) -> list[dict]:
-    """For each search query, find the closest past decisions; keep the closest overall."""
-    per_query: list[list[dict]] = []
+    """For each search query, find the closest past decisions; keep the closest overall.
+
+    All queries go in one round trip: a PR can have up to 70 of them.
+    """
     with psycopg.connect(config.DATABASE_URL) as conn:
-        for vector in vectors:
-            v = to_vector(vector)
-            rows = conn.execute(
-                """
+        rows = conn.execute(
+            """
+            SELECT q.n, d.id, d.statement, d.rationale, d.scope, d.source_url, d.distance
+            FROM unnest(%s::text[]) WITH ORDINALITY AS q(v, n)
+            CROSS JOIN LATERAL (
                 SELECT id, statement, rationale, scope, source_url,
-                       embedding <=> %s::vector AS distance
+                       embedding <=> q.v::vector AS distance
                 FROM decisions
                 WHERE repo = %s
                   AND pr_number <> %s          -- a PR can't conflict with its own decisions
                   AND status <> 'retired'      -- retired decisions are no longer enforced
-                ORDER BY embedding <=> %s::vector
+                ORDER BY embedding <=> q.v::vector
                 LIMIT %s
-                """,
-                (v, repo, number, v, TOP_K),
-            ).fetchall()
-            per_query.append([
-                {"id": id_, "statement": statement, "rationale": rationale,
-                 "scope": scope, "source_url": url, "distance": distance}
-                for id_, statement, rationale, scope, url, distance in rows
-            ])
-    return closest_overall(per_query)
+            ) d
+            """,
+            ([to_vector(v) for v in vectors], repo, number, TOP_K),
+        ).fetchall()
+    per_query: dict[int, list[dict]] = {}
+    for n, id_, statement, rationale, scope, url, distance in rows:
+        per_query.setdefault(n, []).append({"id": id_, "statement": statement, "rationale": rationale,
+                                            "scope": scope, "source_url": url, "distance": distance})
+    return closest_overall(list(per_query.values()))
 
 
 def decisions_as_text(candidates: list[dict]) -> str:
