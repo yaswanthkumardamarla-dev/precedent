@@ -19,6 +19,7 @@
 - [Repository layout](#repository-layout)
 - [Running it locally](#running-it-locally)
 - [Tests and CI](#tests-and-ci)
+- [Evaluation](#evaluation)
 - [Deploying for free](#deploying-for-free)
 - [Reference: API, data model, configuration](#reference)
 - [Limitations and next steps](#limitations-and-next-steps)
@@ -108,7 +109,7 @@ flowchart LR
 ### 3. Checking a pull request: retrieve, then judge ([`check.py`](backend/app/check.py))
 
 1. Fetch the PR and its changed files: at most 20 files, and at most 4,000 characters of diff per file.
-2. **Retrieve.** For each changed file, embed a query made of the PR title, the file name and its *added* lines (task type `RETRIEVAL_QUERY`). Then search the decisions with pgvector's HNSW index by cosine distance: the 5 nearest per file, from the same repository, leaving out retired decisions and decisions made in this same PR. Keep the 10 closest overall.
+2. **Retrieve.** For each changed file, embed a query made of the PR title, the file name and its *added* lines (task type `RETRIEVAL_QUERY`). Then search the decisions with pgvector's HNSW index by cosine distance: the 10 nearest per file, from the same repository, leaving out retired decisions and decisions made in this same PR. Keep the 10 closest overall.
 3. **Judge.** Send Gemini the diff and only those candidate decisions. The prompt favours precision: only added lines count, a related decision is not a conflict, and *"a false alarm is worse than a miss"*.
 4. Again, drop any conflict that cites a decision the model wasn't given.
 5. Replace the PR's stored conflicts, and **create or update one comment** on the PR. The comment is found again by a hidden HTML marker. A new comment is only posted when there are conflicts, and an existing one is edited to ✅ once they're fixed.
@@ -182,6 +183,7 @@ backend/
     migrate.py        applies schema.sql
   schema.sql          tables and the vector index (safe to re-run)
   tests/              pytest: webhook routing, signatures, access control, limits, cleanup
+  evals/              labelled cases and a scoring script for the two model steps (see Evaluation)
 frontend/
   src/app/            pages: overview, decisions, activity, login; auth/ for the OAuth routes
   src/components/     header, UI pieces, decision action buttons
@@ -261,7 +263,7 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest -q tests
 cd frontend && npm run lint && npm run build
 ```
 
-There are 28 backend tests. They cover:
+There are 35 backend tests. They cover:
 
 - which GitHub events start which job, including that drafts and bots are ignored
 - webhook signature checks
@@ -273,10 +275,74 @@ There are 28 backend tests. They cover:
 - the daily limits
 - that removing or uninstalling the App deletes data
 - which missed webhooks are chosen for resending
+- that the evaluation cases are well-formed, and that they're scored correctly (no Gemini calls)
 
 The database tests use a separate `precedent_test` database, never your real one. They are skipped when that database isn't reachable.
 
 GitHub Actions runs the backend tests against a real pgvector Postgres, then lints and builds the frontend, on every pull request and every push to `main`.
+
+## Evaluation
+
+The tests show the code does what it should. They can't show whether the model's answers are right. For that, [`backend/evals/`](backend/evals) holds a hand-labelled set:
+
+- **[`extraction.yaml`](backend/evals/extraction.yaml):** 22 review discussions, each labelled with the decisions it really contains. Half contain none: questions, one-off fix requests, rejected suggestions, explanations, and temporary exceptions.
+- **[`conflicts.yaml`](backend/evals/conflicts.yaml):** one repository's 20 decisions, and 24 pull request diffs, each labelled with the decisions it breaks. A third break none. There are more decisions than the model is shown, so the search has to choose.
+
+Each case goes through the same functions as production: transcript building, the citation check, query building, merging the candidates, and both prompts. The one difference is that the search over 20 decisions runs in memory instead of in pgvector.
+
+**How it's scored**
+
+| Measure | Meaning |
+| --- | --- |
+| Precision | Of what the model reported, how much was right |
+| Recall | Of what it should have reported, how much it found |
+| Citation accuracy | Extracted decisions that cite one of the right comments |
+| Discussions without a decision left empty | Extraction returned nothing when there was nothing to find |
+| Retrieval recall | Broken decisions that reached the model at all. A miss here can't be fixed in the prompt |
+| Clean PRs left alone | PRs that break nothing got no comment |
+
+An extracted decision counts as found when its embedding has a cosine similarity of at least 0.88 with an expected one. Paraphrases of the same rule scored 0.93 or more, and the two closest different rules scored 0.84.
+
+**Running it**
+
+```sh
+cd backend
+python -m evals.run                     # both suites
+python -m evals.run --only chk-04 -v    # one case, with details
+python -m evals.run --repeat 3 --save   # 3 runs, mean and range, written to evals/RESULTS.md
+```
+
+**Results**
+
+The first measurement found two problems, and both are fixed:
+
+- **One-file PRs were searched too narrowly.** Each changed file fetched its 5 nearest decisions. So a one-file PR only showed the model 5, and rules ranked 6th to 10th were never considered. Each file now fetches 10.
+- **The extraction prompt turned the wrong things into rules.** It made rules out of an explanation of existing code, and out of a "skip this test for this release only". The prompt now lists both as not decisions.
+
+Mean of 3 runs each, with the range when runs disagreed:
+
+| | Before | After |
+| --- | --- | --- |
+| Extraction precision | 0.90 (0.86–0.92) | **1.00** |
+| Extraction recall | 1.00 | 1.00 |
+| Extraction: discussions without a decision left empty | 0.88 (0.82–0.91) | **1.00** |
+| Conflict precision | 0.98 (0.94–1.00) | 0.94 |
+| Conflict recall | 0.83 | **0.92** (0.89–0.94) |
+| Conflict retrieval recall | 0.89 | **0.94** |
+| Clean PRs left alone | 0.96 (0.88–1.00) | 0.87 (0.86–0.88) |
+
+The latest run's failures are in [`evals/RESULTS.md`](backend/evals/RESULTS.md). Three are still open:
+
+- **The fix cost some precision.** In chk-02, an endpoint with full type hints is flagged for missing type hints in every run. With 10 candidates instead of 5, the model makes this false alarm consistently.
+- **Retrieval still misses some decisions.** In chk-01, a `print` call isn't caught, because "Use the logging module instead of print" ranks 11th of 20 and isn't shown to the model. All 20 decisions fall between distance 0.36 and 0.49: one query per file blends everything that file does. Smaller queries (one per hunk) or matching on keywords like `print` would separate them better.
+- **Judgement varies between runs.** In chk-15, an edit to a released migration was missed in 1 run of 3.
+
+**Caveats**
+
+- **The cases are small and synthetic.** They were written for this project, not taken from real teams' reviews. They catch regressions when a prompt or model changes. They don't prove accuracy on real code.
+- **The labels are hand-written** and could be wrong. When a case fails, check the label before blaming the model.
+- **Runs vary.** Gemini isn't deterministic even at temperature 0: a case can pass in one run and fail in the next. Compare changes with `--repeat`, not with a single run.
+- **It's slow on the free tier.** A full run makes about 80 requests. On the free tier, 3 runs can take hours of waiting out rate limits. Cases Gemini still refuses after retries are listed as not scored, instead of being counted as failures: 3 of 138 in the latest measurement.
 
 ## Deploying for free
 
@@ -351,7 +417,8 @@ Every `/api/*` request needs `Authorization: Bearer <API_TOKEN>`, and is answere
 
 ## Limitations and next steps
 
-- **No measured accuracy yet.** The next step is a small labelled set of review threads and diffs, so that precision and recall can be measured whenever a prompt or model changes.
+- **Accuracy is measured on a small, synthetic set:** 46 cases, written for this project ([Evaluation](#evaluation)). Real teams' review threads would be a better test.
+- **Retrieval uses one query per changed file,** which blends everything that file does. Queries per hunk, or keyword matching, would catch more.
 - **One instance only.** Jobs run inside the web process. More traffic would need a real queue and separate workers.
 - **Decisions belong to one repository.** Organisation-wide decisions, shared across repositories, would be a natural extension.
 - **Large PRs are cut down:** at most 20 files, and 4,000 characters of diff per file.

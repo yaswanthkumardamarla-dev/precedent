@@ -82,6 +82,8 @@ These are NOT decisions:
 - One-off fix requests ("rename this variable", "fix the typo")
 - Questions, praise, or "LGTM"
 - Suggestions that someone rejected, or that are still being argued about
+- Explanations of why the existing code is the way it is ("it's sync because the library blocks")
+- Temporary exceptions that only cover this PR or release ("for this release only, skip the test")
 
 Rules:
 - Use only what the comments say. Never invent a decision.
