@@ -1,0 +1,352 @@
+# Extraction cases: review discussions, each labelled with the decisions it really contains.
+#
+# A decision is a rule the team means to apply beyond this one line of code (see EXTRACTION_PROMPT in
+# app/llm.py). About half the cases contain none: one-off fixes, praise, questions, rejected or
+# unsettled suggestions. Those are where an extractor goes wrong.
+#
+# comments:  id, user, body; plus `path` (and optionally `hunk`) for an inline review comment,
+#            `reply_to: <id>` for a reply in that thread, or `review: true` for a review summary.
+#            Anything else is a comment in the PR conversation.
+# expect:    the decisions, each with the comment ids where it is stated or agreed (any one counts).
+
+- id: ext-01
+  note: rule stated inline and agreed by the author
+  comments:
+    - id: 101
+      user: maria
+      path: app/api/users.py
+      hunk: |
+        @@ -10,6 +10,8 @@ def get_user(user_id):
+        +    print("loading user", user_id)
+      body: Please use the logging module rather than print. We want to be able to filter by level in production, so let's do that everywhere from now on.
+    - id: 102
+      user: dev
+      reply_to: 101
+      body: Makes sense, switched to logger.debug.
+  expect:
+    - statement: Use the logging module instead of print.
+      sources: [101, 102]
+
+- id: ext-02
+  note: approval only
+  comments:
+    - id: 201
+      user: maria
+      review: true
+      body: LGTM, nice work!
+    - id: 202
+      user: sam
+      body: Thanks for picking this up 🙌
+  expect: []
+
+- id: ext-03
+  note: one-off fix requests on specific lines
+  comments:
+    - id: 301
+      user: maria
+      path: app/billing/invoice.py
+      body: "nit: `tmp` isn't a great name here, maybe `subtotal`?"
+    - id: 302
+      user: maria
+      path: app/billing/invoice.py
+      body: There's an off-by-one here, the range should include the last item.
+    - id: 303
+      user: dev
+      reply_to: 302
+      body: Good catch, fixed.
+  expect: []
+
+- id: ext-04
+  note: suggestion that was rejected
+  comments:
+    - id: 401
+      user: sam
+      path: app/jobs/queue.py
+      body: Should we move the job queue to Redis? It would be faster.
+    - id: 402
+      user: maria
+      reply_to: 401
+      body: I'd rather not. That's one more service to run and Postgres handles our volume fine.
+    - id: 403
+      user: sam
+      reply_to: 401
+      body: Fair enough, let's leave it as is.
+  expect: []
+
+- id: ext-05
+  note: debate with no conclusion
+  comments:
+    - id: 501
+      user: sam
+      body: I think we should switch the whole codebase to async SQLAlchemy.
+    - id: 502
+      user: maria
+      body: Maybe, but the migration would be huge. Not sure it's worth it.
+    - id: 503
+      user: lee
+      body: Let's talk about it at the next planning meeting.
+  expect: []
+
+- id: ext-06
+  note: rule with a rationale, in the PR conversation
+  comments:
+    - id: 601
+      user: lee
+      body: >-
+        Heads up for everyone: all timestamps we store must be timezone-aware UTC. We had two incidents
+        last quarter from naive datetimes being compared with aware ones. Use datetime.now(timezone.utc),
+        never datetime.utcnow().
+    - id: 602
+      user: dev
+      body: Updated the model to use timezone-aware UTC.
+  expect:
+    - statement: Store timestamps as timezone-aware UTC datetimes, using datetime.now(timezone.utc) rather than datetime.utcnow().
+      sources: [601]
+
+- id: ext-07
+  note: two separate rules in one comment
+  comments:
+    - id: 701
+      user: maria
+      path: app/api/orders.py
+      body: >-
+        Two things we agreed on in the API guild that apply here and to every endpoint going forward:
+        (1) all new endpoints need full type hints, and (2) list endpoints must be paginated with a
+        maximum page size of 100.
+    - id: 702
+      user: dev
+      reply_to: 701
+      body: Done, added both.
+  expect:
+    - statement: All new endpoints must have full type hints.
+      sources: [701]
+    - statement: List endpoints must be paginated, with a maximum page size of 100.
+      sources: [701]
+
+- id: ext-08
+  note: rule raised as a question, then agreed
+  comments:
+    - id: 801
+      user: sam
+      path: app/clients/payments.py
+      body: Should we require an explicit timeout on every outbound HTTP call? This one hung for 10 minutes in staging.
+    - id: 802
+      user: maria
+      reply_to: 801
+      body: Yes, let's make that the rule. No HTTP call without a timeout.
+  expect:
+    - statement: Every outbound HTTP call must set an explicit timeout.
+      sources: [801, 802]
+
+- id: ext-09
+  note: a rule mixed with one-off nits
+  comments:
+    - id: 901
+      user: lee
+      path: app/db/queries.py
+      body: "nit: trailing whitespace on this line."
+    - id: 902
+      user: lee
+      path: app/db/queries.py
+      body: >-
+        Never build SQL with f-strings, that's how we got the injection bug last year. Always pass
+        parameters to execute(). This applies to every query in the codebase.
+    - id: 903
+      user: dev
+      reply_to: 902
+      body: Switched to a parameterized query.
+  expect:
+    - statement: Use parameterized queries; never build SQL with f-strings or string formatting.
+      sources: [902]
+
+- id: ext-10
+  note: stylistic suggestion for this line only
+  comments:
+    - id: 1001
+      user: sam
+      path: app/utils/text.py
+      body: You could use a dict comprehension here, it would be a bit shorter. Up to you.
+    - id: 1002
+      user: dev
+      reply_to: 1001
+      body: Changed it.
+  expect: []
+
+- id: ext-11
+  note: reviewer proposes a rule, then backs down
+  comments:
+    - id: 1101
+      user: maria
+      path: tests/test_orders.py
+      body: I think every test file should have a module docstring. Can we make that a rule?
+    - id: 1102
+      user: dev
+      reply_to: 1101
+      body: That feels like a lot of noise for tiny test files, the test names already describe them.
+    - id: 1103
+      user: maria
+      reply_to: 1101
+      body: Yeah, you're right. Forget it.
+  expect: []
+
+- id: ext-12
+  note: an early choice replaced by a later one in the thread
+  comments:
+    - id: 1201
+      user: sam
+      path: app/clients/shipping.py
+      body: Let's use requests for this client.
+    - id: 1202
+      user: lee
+      reply_to: 1201
+      body: >-
+        We already use httpx in three other clients and it supports async. Let's standardise on
+        httpx for all HTTP clients instead of mixing libraries.
+    - id: 1203
+      user: sam
+      reply_to: 1201
+      body: Agreed, httpx everywhere.
+  expect:
+    - statement: Use httpx for all HTTP clients, not requests.
+      sources: [1202, 1203]
+
+- id: ext-13
+  note: question and explanation only
+  comments:
+    - id: 1301
+      user: sam
+      path: app/api/reports.py
+      body: Why is this endpoint sync when the rest are async?
+    - id: 1302
+      user: dev
+      reply_to: 1301
+      body: The PDF library it calls is blocking, so FastAPI runs it in a thread pool. That's intended.
+    - id: 1303
+      user: sam
+      reply_to: 1301
+      body: Got it, thanks.
+  expect: []
+
+- id: ext-14
+  note: rule in a review summary
+  comments:
+    - id: 1401
+      user: maria
+      review: true
+      body: >-
+        Approving, the fix looks right. One process note: going forward, every bug fix PR needs a
+        regression test that fails without the fix. Please add one here before merging.
+  expect:
+    - statement: Every bug fix must include a regression test that fails without the fix.
+      sources: [1401]
+
+- id: ext-15
+  note: personal preference, explicitly not a rule
+  comments:
+    - id: 1501
+      user: sam
+      path: app/main.py
+      body: I personally prefer single quotes, but the formatter decides, so ignore me.
+  expect: []
+
+- id: ext-16
+  note: rule limited to one folder
+  comments:
+    - id: 1601
+      user: lee
+      path: migrations/0003_add_orders.py
+      body: >-
+        Please don't edit migrations that have already been released. In migrations/, always add a new
+        migration file instead; editing old ones breaks databases that already ran them.
+    - id: 1602
+      user: dev
+      reply_to: 1601
+      body: Reverted the edit and added 0007_fix_orders.py instead.
+  expect:
+    - statement: Never edit a migration that has already been released; add a new migration file instead.
+      sources: [1601]
+
+- id: ext-17
+  note: temporary exception, not a lasting rule
+  comments:
+    - id: 1701
+      user: maria
+      body: For this release only, let's skip the flaky checkout test so we can ship. I'll fix it next week.
+    - id: 1702
+      user: dev
+      body: Ok, marked it skip with a link to the issue.
+  expect: []
+
+- id: ext-18
+  note: rule that came from a meeting, restated in review
+  comments:
+    - id: 1801
+      user: lee
+      path: app/billing/cart.py
+      body: >-
+        As agreed in the architecture meeting, money is always stored as integer cents, never as float.
+        This total is a float.
+    - id: 1802
+      user: dev
+      reply_to: 1801
+      body: Converted to cents.
+  expect:
+    - statement: Store money as integer cents, never as float.
+      sources: [1801]
+
+- id: ext-19
+  note: follow-up to discuss later, nothing decided
+  comments:
+    - id: 1901
+      user: sam
+      body: Should we adopt mypy in strict mode? I'll open an issue so we can discuss it properly.
+    - id: 1902
+      user: maria
+      body: Good idea, let's discuss there.
+  expect: []
+
+- id: ext-20
+  note: three people converge on a decision
+  comments:
+    - id: 2001
+      user: sam
+      body: For the new background jobs, we could use Celery with Redis, or just a Postgres table.
+    - id: 2002
+      user: lee
+      body: Postgres. We already run it and don't need another service to operate.
+    - id: 2003
+      user: maria
+      body: Agreed. Background jobs live in Postgres; no Redis.
+  expect:
+    - statement: Use a Postgres table for background jobs instead of adding Redis or Celery.
+      sources: [2002, 2003]
+
+- id: ext-21
+  note: decision in one thread, unrelated nit in another
+  comments:
+    - id: 2101
+      user: maria
+      path: app/api/auth.py
+      body: >-
+        We never log tokens, passwords or full request bodies, anywhere. This line logs the whole
+        request including the Authorization header.
+    - id: 2102
+      user: dev
+      reply_to: 2101
+      body: Removed, it now logs only the path.
+    - id: 2103
+      user: sam
+      path: app/api/auth.py
+      body: Typo in the docstring, "authentification".
+  expect:
+    - statement: Never log tokens, passwords or full request bodies.
+      sources: [2101]
+
+- id: ext-22
+  note: praise for following an existing rule (nothing new decided)
+  comments:
+    - id: 2201
+      user: lee
+      path: app/api/items.py
+      body: Nice, thanks for adding the type hints and the pagination.
+  expect: []

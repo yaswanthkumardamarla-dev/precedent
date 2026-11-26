@@ -87,6 +87,21 @@ def normalize(statement: str) -> str:
     return statement.strip().lower().rstrip(".")
 
 
+def clean_decisions(decisions: list, by_id: dict[int, dict]) -> tuple[list, int]:
+    """Keep each decision once, and only if it cites a real comment. Returns (kept, how many cited none)."""
+    # Guard against made-up citations: keep only decisions that point to a real comment.
+    valid = [d for d in decisions if d.source_comment_id in by_id]
+    # The same rule stated twice (e.g. a repeated comment) should be stored once.
+    seen: set[str] = set()
+    unique = []
+    for d in valid:
+        key = normalize(d.statement)
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+    return unique, len(decisions) - len(valid)
+
+
 def save_decisions(repo: str, number: int, decisions, embeddings, by_id) -> int:
     """Store decisions; returns how many were skipped because they were already reviewed."""
     skipped = 0
@@ -155,18 +170,7 @@ def extract_pr(repo: str, number: int, show: bool = False) -> int:
         decisions = extract_decisions(transcript)
     print(f"    model returned {len(decisions)} decision(s)")
 
-    # Guard against made-up citations: keep only decisions that point to a real comment.
-    valid = [d for d in decisions if d.source_comment_id in by_id]
-    dropped = len(decisions) - len(valid)
-    # The same rule stated twice (e.g. a repeated comment) should be stored once.
-    seen: set[str] = set()
-    unique = []
-    for d in valid:
-        key = normalize(d.statement)
-        if key not in seen:
-            seen.add(key)
-            unique.append(d)
-    valid = unique
+    valid, dropped = clean_decisions(decisions, by_id)
 
     embeddings = []
     if valid:

@@ -1,0 +1,442 @@
+# Conflict-check cases: the decisions of one (made-up) Python web service, and pull requests labelled
+# with the decisions they break.
+#
+# Every case is searched against all 20 decisions, as in production: the nearest-decision search picks
+# up to 10 candidates and the model judges only those. So a missed conflict is either a search miss
+# ("not retrieved") or a judgement miss.
+#
+# A third of the cases break nothing. They follow a rule, remove an offending line, touch only docs, or do
+# something that looks close to a rule without breaking it. A false alarm there is the failure that
+# gets a review bot muted.
+#
+# files:   filename and patch (a unified diff; only lines starting with + are additions).
+# expect:  keys of the decisions the PR breaks.
+
+decisions:
+  - key: logging
+    statement: Use the logging module instead of print.
+    rationale: Logs can be filtered by level in production.
+  - key: type-hints
+    statement: All new endpoints must have full type hints for parameters and return values.
+    scope: API endpoints in app/api/
+  - key: pagination
+    statement: List endpoints must be paginated, with a maximum page size of 100.
+    scope: API endpoints in app/api/
+  - key: utc
+    statement: Store timestamps as timezone-aware UTC datetimes using datetime.now(timezone.utc), never datetime.utcnow() or naive datetimes.
+  - key: sql-params
+    statement: Use parameterized queries; never build SQL with f-strings or string formatting.
+    rationale: Prevents SQL injection.
+  - key: money-cents
+    statement: Store money as integer cents, never as float.
+  - key: http-timeout
+    statement: Every outbound HTTP call must set an explicit timeout.
+  - key: httpx
+    statement: Use httpx for HTTP clients, not requests.
+  - key: no-bare-except
+    statement: Never use a bare `except:`; catch specific exceptions.
+  - key: no-secrets-in-code
+    statement: Read secrets and service URLs from configuration (app/config.py, environment variables); never hard-code them.
+  - key: no-sensitive-logs
+    statement: Never log tokens, passwords or full request bodies.
+  - key: migrations
+    statement: Never edit a migration that has already been released; add a new migration file instead.
+    scope: migrations/
+  - key: new-deps
+    statement: Don't add a new third-party dependency without an approved issue linked in the PR description.
+    scope: requirements.txt
+  - key: no-sleep-in-tests
+    statement: Tests must not call time.sleep; use the fake clock fixture instead.
+    scope: tests/
+  - key: not-found
+    statement: Return 404 when a requested resource doesn't exist, not 200 with an empty or null body.
+  - key: snake-case
+    statement: JSON responses use snake_case keys.
+  - key: async-db
+    statement: Async endpoints must use the async database session; no blocking database calls inside async def.
+  - key: api-fetch
+    statement: Frontend code calls the backend through the shared apiFetch helper, never fetch directly.
+    scope: frontend/src/
+  - key: lazy-logging
+    statement: Pass values to log calls as arguments (logger.info("x %s", y)), not with f-strings.
+  - key: regression-tests
+    statement: Every bug fix must include a regression test.
+
+cases:
+  - id: chk-01
+    note: print and a missing type hint in a new endpoint
+    expect: [logging, type-hints]
+    title: Add user lookup endpoint
+    files:
+      - filename: app/api/users.py
+        patch: |
+          @@ -0,0 +1,9 @@
+          +from fastapi import APIRouter
+          +
+          +router = APIRouter()
+          +
+          +
+          +@router.get("/users/{user_id}")
+          +def get_user(user_id):
+          +    print("fetching user", user_id)
+          +    return {"id": user_id}
+
+  - id: chk-02
+    note: new endpoint that follows the rules
+    expect: []
+    title: Add order lookup endpoint
+    files:
+      - filename: app/api/orders.py
+        patch: |
+          @@ -0,0 +1,14 @@
+          +import logging
+          +
+          +from fastapi import APIRouter, HTTPException
+          +
+          +from app.db import orders
+          +
+          +router = APIRouter()
+          +log = logging.getLogger(__name__)
+          +
+          +
+          +@router.get("/orders/{order_id}")
+          +async def get_order(order_id: int) -> dict:
+          +    log.debug("fetching order %s", order_id)
+          +    return await orders.get_or_404(order_id)
+
+  - id: chk-03
+    note: removes print calls (removed lines are not a conflict)
+    expect: []
+    title: Replace prints with logging
+    files:
+      - filename: app/jobs/cleanup.py
+        patch: |
+          @@ -1,9 +1,12 @@
+          +import logging
+          +
+          +log = logging.getLogger(__name__)
+          +
+           def cleanup(days: int) -> int:
+          -    print("cleaning up records older than", days)
+          +    log.info("cleaning up records older than %s days", days)
+               removed = delete_older_than(days)
+          -    print("removed", removed)
+          +    log.info("removed %s records", removed)
+               return removed
+
+  - id: chk-04
+    note: SQL built with an f-string
+    expect: [sql-params]
+    title: Search products by name
+    files:
+      - filename: app/db/products.py
+        patch: |
+          @@ -20,3 +20,8 @@ def get_product(conn, product_id: int):
+          +
+          +
+          +def search_products(conn, name: str) -> list[dict]:
+          +    query = f"SELECT id, name FROM products WHERE name ILIKE '%{name}%'"
+          +    return conn.execute(query).fetchall()
+
+  - id: chk-05
+    note: parameterized SQL
+    expect: []
+    title: Search products by name
+    files:
+      - filename: app/db/products.py
+        patch: |
+          @@ -20,3 +20,9 @@ def get_product(conn, product_id: int):
+          +
+          +
+          +def search_products(conn, name: str) -> list[dict]:
+          +    return conn.execute(
+          +        "SELECT id, name FROM products WHERE name ILIKE %s", (f"%{name}%",)
+          +    ).fetchall()
+
+  - id: chk-06
+    note: order total computed as a float
+    expect: [money-cents]
+    title: Compute order totals
+    files:
+      - filename: app/billing/totals.py
+        patch: |
+          @@ -0,0 +1,6 @@
+          +def order_total(items: list[dict]) -> float:
+          +    total = 0.0
+          +    for item in items:
+          +        total += float(item["price"]) * item["quantity"]
+          +    return round(total, 2)
+
+  - id: chk-07
+    note: naive UTC timestamp
+    expect: [utc]
+    title: Record when an invoice was paid
+    files:
+      - filename: app/billing/invoices.py
+        patch: |
+          @@ -1,4 +1,5 @@
+           from datetime import datetime
+          @@ -30,6 +31,7 @@ def mark_paid(invoice):
+               invoice.status = "paid"
+          +    invoice.paid_at = datetime.utcnow()
+               save(invoice)
+
+  - id: chk-08
+    note: HTTP call without a timeout
+    expect: [http-timeout]
+    title: Fetch exchange rates
+    files:
+      - filename: app/clients/rates.py
+        patch: |
+          @@ -0,0 +1,8 @@
+          +import httpx
+          +
+          +from app import config
+          +
+          +
+          +def fetch_rates() -> dict:
+          +    response = httpx.get(f"{config.RATES_URL}/latest")
+          +    return response.json()
+
+  - id: chk-09
+    note: timeout set once on the client (follows the rule)
+    expect: []
+    title: Fetch exchange rates
+    files:
+      - filename: app/clients/rates.py
+        patch: |
+          @@ -0,0 +1,10 @@
+          +import httpx
+          +
+          +from app import config
+          +
+          +client = httpx.Client(base_url=config.RATES_URL, timeout=10.0)
+          +
+          +
+          +def fetch_rates() -> dict:
+          +    response = client.get("/latest")
+          +    return response.json()
+
+  - id: chk-10
+    note: requests instead of httpx, with a timeout
+    expect: [httpx]
+    title: Add shipping label client
+    files:
+      - filename: app/clients/shipping.py
+        patch: |
+          @@ -0,0 +1,9 @@
+          +import requests
+          +
+          +from app import config
+          +
+          +
+          +def create_label(order_id: int) -> str:
+          +    r = requests.post(f"{config.SHIPPING_URL}/labels", json={"order": order_id}, timeout=10)
+          +    r.raise_for_status()
+          +    return r.json()["label_url"]
+
+  - id: chk-11
+    note: bare except
+    expect: [no-bare-except]
+    title: Fall back to the database when the cache is unavailable
+    files:
+      - filename: app/cache.py
+        patch: |
+          @@ -12,5 +12,8 @@ def get_cached(key: str):
+          -    return redis.get(key)
+          +    try:
+          +        return redis.get(key)
+          +    except:
+          +        return None
+
+  - id: chk-12
+    note: catches a specific exception (follows the rule)
+    expect: []
+    title: Fall back to the database when the cache is unavailable
+    files:
+      - filename: app/cache.py
+        patch: |
+          @@ -12,5 +12,8 @@ def get_cached(key: str):
+          -    return redis.get(key)
+          +    try:
+          +        return redis.get(key)
+          +    except ConnectionError:
+          +        return None
+
+  - id: chk-13
+    note: hard-coded API key
+    expect: [no-secrets-in-code]
+    title: Send receipts by email
+    files:
+      - filename: app/email.py
+        patch: |
+          @@ -0,0 +1,9 @@
+          +import httpx
+          +
+          +MAIL_API_KEY = "sk_live_4f9a8b7c6d5e4f3a2b1c"
+          +
+          +
+          +def send_receipt(to: str, body: str) -> None:
+          +    httpx.post("https://api.mailer.example/send", timeout=10,
+          +               headers={"Authorization": f"Bearer {MAIL_API_KEY}"},
+          +               json={"to": to, "body": body})
+
+  - id: chk-14
+    note: logs a token with an f-string
+    expect: [no-sensitive-logs, lazy-logging]
+    title: Log sign-ins
+    files:
+      - filename: app/api/auth.py
+        patch: |
+          @@ -40,6 +40,7 @@ async def sign_in(form: SignInForm) -> TokenResponse:
+               token = issue_token(user)
+          +    log.info(f"user {user.id} signed in with token {token}")
+               return TokenResponse(access_token=token)
+
+  - id: chk-15
+    note: edits a released migration
+    expect: [migrations]
+    title: Add created_at to the orders index
+    files:
+      - filename: migrations/0003_add_orders.py
+        patch: |
+          @@ -14,7 +14,7 @@ def upgrade():
+          -    op.create_index("orders_user_idx", "orders", ["user_id"])
+          +    op.create_index("orders_user_idx", "orders", ["user_id", "created_at"])
+
+  - id: chk-16
+    note: adds a new migration (follows the rule)
+    expect: []
+    title: Add created_at to the orders index
+    files:
+      - filename: migrations/0007_orders_index.py
+        patch: |
+          @@ -0,0 +1,10 @@
+          +revision = "0007"
+          +down_revision = "0006"
+          +
+          +
+          +def upgrade():
+          +    op.drop_index("orders_user_idx")
+          +    op.create_index("orders_user_idx", "orders", ["user_id", "created_at"])
+          +
+          +
+          +def downgrade():
+          +    op.drop_index("orders_user_idx")
+
+  - id: chk-17
+    note: new dependency without a linked issue
+    expect: [new-deps]
+    title: Add PDF invoices
+    body: Generates invoice PDFs.
+    files:
+      - filename: requirements.txt
+        patch: |
+          @@ -3,3 +3,4 @@ fastapi==0.115.0
+           httpx==0.27.2
+           psycopg[binary]==3.2.3
+          +reportlab==4.2.5
+
+  - id: chk-18
+    note: version bump of an existing dependency
+    expect: []
+    title: Bump httpx
+    body: Security patch release.
+    files:
+      - filename: requirements.txt
+        patch: |
+          @@ -3,3 +3,3 @@ fastapi==0.115.0
+          -httpx==0.27.2
+          +httpx==0.27.3
+           psycopg[binary]==3.2.3
+
+  - id: chk-19
+    note: time.sleep in a test
+    expect: [no-sleep-in-tests]
+    title: Test that sessions expire
+    files:
+      - filename: tests/test_sessions.py
+        patch: |
+          @@ -0,0 +1,8 @@
+          +import time
+          +
+          +
+          +def test_session_expires(client):
+          +    token = client.sign_in("alice")
+          +    time.sleep(2)
+          +    response = client.get("/me", token=token)
+          +    assert response.status_code == 401
+
+  - id: chk-20
+    note: list endpoint that returns every row
+    expect: [pagination]
+    title: List all products
+    files:
+      - filename: app/api/products.py
+        patch: |
+          @@ -0,0 +1,7 @@
+          +from app.db import products
+          +
+          +
+          +@router.get("/products")
+          +async def list_products() -> list[dict]:
+          +    return await products.all()
+
+  - id: chk-21
+    note: 200 with null for a missing record
+    expect: [not-found]
+    title: Get a single product
+    files:
+      - filename: app/api/products.py
+        patch: |
+          @@ -10,0 +11,6 @@
+          +@router.get("/products/{product_id}")
+          +async def get_product(product_id: int) -> dict:
+          +    product = await products.find(product_id)
+          +    if product is None:
+          +        return {"product": None}
+          +    return {"product": product}
+
+  - id: chk-22
+    note: blocking database call in an async endpoint
+    expect: [async-db]
+    title: Add stats endpoint
+    files:
+      - filename: app/api/stats.py
+        patch: |
+          @@ -0,0 +1,8 @@
+          +from app.db import sync_session
+          +
+          +
+          +@router.get("/stats")
+          +async def stats() -> dict:
+          +    with sync_session() as s:
+          +        count = s.execute("SELECT count(*) FROM orders").scalar()
+          +    return {"order_count": count}
+
+  - id: chk-23
+    note: frontend calls fetch directly
+    expect: [api-fetch]
+    title: Show order history
+    files:
+      - filename: frontend/src/pages/orders.tsx
+        patch: |
+          @@ -0,0 +1,7 @@
+          +export async function loadOrders(): Promise<Order[]> {
+          +  const response = await fetch("/api/orders");
+          +  if (!response.ok) throw new Error("Failed to load orders");
+          +  return response.json();
+          +}
+
+  - id: chk-24
+    note: documentation-only change that mentions print
+    expect: []
+    title: Document how to start the server
+    files:
+      - filename: README.md
+        patch: |
+          @@ -5,3 +5,7 @@
+          +## Running locally
+          +
+          +Run `python -m app`. It will print the URL to open, for example http://localhost:8000,
+          +and logs requests at INFO level.

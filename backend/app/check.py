@@ -36,9 +36,19 @@ def describe_change(pr: dict, files: list[dict]) -> tuple[str, list[str]]:
     return "\n".join(parts), queries
 
 
+def closest_overall(per_query: list[list[dict]]) -> list[dict]:
+    """Merge each changed file's nearest decisions: each decision once, at its smallest distance, closest first."""
+    best: dict[int, dict] = {}
+    for rows in per_query:
+        for d in rows:
+            if d["id"] not in best or d["distance"] < best[d["id"]]["distance"]:
+                best[d["id"]] = d
+    return sorted(best.values(), key=lambda d: d["distance"])[:MAX_CANDIDATES]
+
+
 def find_candidates(repo: str, number: int, vectors: list[list[float]]) -> list[dict]:
     """For each changed file, find the closest past decisions; keep the closest overall."""
-    best: dict[int, dict] = {}
+    per_query: list[list[dict]] = []
     with psycopg.connect(config.DATABASE_URL) as conn:
         for vector in vectors:
             v = to_vector(vector)
@@ -55,13 +65,12 @@ def find_candidates(repo: str, number: int, vectors: list[list[float]]) -> list[
                 """,
                 (v, repo, number, v, TOP_K),
             ).fetchall()
-            for id_, statement, rationale, scope, url, distance in rows:
-                if id_ not in best or distance < best[id_]["distance"]:
-                    best[id_] = {
-                        "id": id_, "statement": statement, "rationale": rationale,
-                        "scope": scope, "source_url": url, "distance": distance,
-                    }
-    return sorted(best.values(), key=lambda d: d["distance"])[:MAX_CANDIDATES]
+            per_query.append([
+                {"id": id_, "statement": statement, "rationale": rationale,
+                 "scope": scope, "source_url": url, "distance": distance}
+                for id_, statement, rationale, scope, url, distance in rows
+            ])
+    return closest_overall(per_query)
 
 
 def decisions_as_text(candidates: list[dict]) -> str:
