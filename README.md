@@ -263,7 +263,7 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest -q tests
 cd frontend && npm run lint && npm run build
 ```
 
-There are 38 backend tests. They cover:
+There are 39 backend tests. They cover:
 
 - which GitHub events start which job, including that drafts and bots are ignored
 - webhook signature checks
@@ -420,7 +420,7 @@ Every `/api/*` request needs `Authorization: Bearer <API_TOKEN>`, and is answere
 ## Limitations and next steps
 
 - **Accuracy is measured on a small, synthetic set:** 46 cases, written for this project ([Evaluation](#evaluation)). Real teams' review threads would be a better test.
-- **Retrieval uses one query per changed file,** which blends everything that file does. Queries per hunk, or keyword matching, would catch more.
+- **Retrieval is by meaning only.** Per-line queries fixed the misses in the eval set, but a rule that names a specific function could still rank too low in a large repository. Combining the vector search with keyword search (hybrid retrieval) is the next step, if it can be done without matching generic words.
 - **One instance only.** Jobs run inside the web process. More traffic would need a real queue and separate workers.
 - **Decisions belong to one repository.** Organisation-wide decisions, shared across repositories, would be a natural extension.
 - **Large PRs are cut down:** at most 20 files, and 4,000 characters of diff per file.
