@@ -87,24 +87,88 @@ function Intro({ me }: { me: Me }) {
     );
   }
 
-  const privateRepos = me.repos.filter((r) => r.private);
+  return <WatchedRepos me={me} />;
+}
+
+// GitHub's Octicons (MIT): repo and lock, 16px.
+const REPO_ICON =
+  "M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.25.25 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z";
+const LOCK_ICON =
+  "M4 4a4 4 0 0 1 8 0v2h.25c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25v-5.5C2 6.784 2.784 6 3.75 6H4Zm8.25 3.5h-8.5a.25.25 0 0 0-.25.25v5.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25ZM10.5 6V4a2.5 2.5 0 1 0-5 0v2Z";
+
+const Icon = ({ path, className = "" }: { path: string; className?: string }) => (
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true" className={className}>
+    <path d={path} />
+  </svg>
+);
+
+/** The signed-in person's repositories: one row each, with whether Precedent checks it. */
+function WatchedRepos({ me }: { me: Me }) {
+  // Checked repositories first, then by name.
+  const repos = [...me.repos].sort((a, b) => Number(a.private) - Number(b.private) || a.name.localeCompare(b.name));
+  const checked = repos.filter((r) => !r.private).length;
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        Watching {me.repos.length} {me.repos.length === 1 ? "repository" : "repositories"}:{" "}
-        {me.repos.map((r, i) => (
-          <span key={r.name}>
-            {i > 0 && ", "}
-            {repoLink(r.name)}
-            {r.private && " (private, not checked)"}
-          </span>
-        ))}
-        {privateRepos.length > 0 && ". Private repositories are not checked in this free demo"}
+    <Card className="p-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-5 pb-4">
+        <div>
+          <h1 className="text-base font-semibold tracking-tight">Your repositories</h1>
+          <p className="mt-0.5 text-sm text-zinc-500">
+            Checking new pull requests in {checked} of {repos.length}{" "}
+            {repos.length === 1 ? "repository" : "repositories"}.
+          </p>
+        </div>
+        <GitHubButton href={me.install_url} size="sm" variant="outline">
+          Add or remove
+        </GitHubButton>
+      </div>
+
+      <ul className="divide-y divide-zinc-100 border-y border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
+        {repos.map((r) => {
+          const [owner, name] = r.name.split("/");
+          return (
+            <li key={r.name} className="flex items-center gap-3 px-5 py-3">
+              <Icon path={r.private ? LOCK_ICON : REPO_ICON} className="shrink-0 text-zinc-400" />
+              <a
+                href={`https://github.com/${r.name}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-w-0 truncate text-sm hover:underline"
+              >
+                <span className="text-zinc-500">{owner}/</span>
+                <span className="font-medium text-zinc-900 dark:text-zinc-100">{name}</span>
+              </a>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                {!r.can_write && (
+                  <span className="hidden text-xs text-zinc-500 sm:inline" title="You can't accept or retire its decisions">
+                    read-only
+                  </span>
+                )}
+                {r.private ? (
+                  <span
+                    className="inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs font-medium text-zinc-600 ring-1 ring-zinc-500/20 ring-inset dark:bg-zinc-400/10 dark:text-zinc-400"
+                    title="Private repositories are not checked in this free demo"
+                  >
+                    Private · not checked
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800 ring-1 ring-emerald-600/20 ring-inset dark:bg-emerald-400/10 dark:text-emerald-300">
+                    <span className="size-1.5 rounded-full bg-emerald-500" />
+                    Checking PRs
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <p className="px-5 py-3 text-xs text-zinc-500">
+        Free demo: up to {me.limits.repo_daily_jobs} checks per repository per day.
+        {checked < repos.length &&
+          " Private repositories are skipped, because pull request code is sent to a free AI tier that may learn from it."}
       </p>
-      <a href={me.install_url} className="text-sm text-sky-700 hover:underline dark:text-sky-400">
-        Add or remove repositories
-      </a>
-    </div>
+    </Card>
   );
 }
 
