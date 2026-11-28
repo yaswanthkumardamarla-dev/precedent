@@ -315,36 +315,36 @@ python -m evals.run --repeat 3 --save   # 3 runs, mean and range, written to eva
 
 **Results**
 
-The first measurement found two problems, and both are fixed:
+Each measurement found problems, and fixing them led to the next one.
 
-- **One-file PRs were searched too narrowly.** Each changed file fetched its 5 nearest decisions. So a one-file PR only showed the model 5, and rules ranked 6th to 10th were never considered. Each file now fetches 10.
-- **The extraction prompt turned the wrong things into rules.** It made rules out of an explanation of existing code, and out of a "skip this test for this release only". The prompt now lists both as not decisions.
+1. **One-file PRs were searched too narrowly.** Each changed file fetched its 5 nearest decisions, so a one-file PR only showed the model 5. Rules ranked 6th to 10th were never considered. Each query now fetches 10.
+2. **The extraction prompt turned the wrong things into rules.** It made rules out of an explanation of existing code, and out of a "skip this test for this release only". The prompt now lists both as not decisions.
+3. **One query per file blended everything the file does.** "Use the logging module instead of print" ranked 11th of 20 for a file with a `print` call, and all 20 decisions fell between distance 0.36 and 0.49. Windows of 3 or 5 lines fixed that miss but caused another. Keyword matching was too noisy: words like `app`, `json` and `log` matched rules in clean PRs. What worked was giving each added line its own query as well. The rule now ranks 7th.
+4. **The model committed to a conflict before reasoning about it.** On a fully typed endpoint, its explanation ended with "None of the decisions are violated", but it had already reported the conflict. Now each entry gives the evidence and the reasoning first and a yes-or-no `breaks_decision` verdict last, and only the yes answers are kept.
+5. **The model didn't know what "(modified)" means.** It wouldn't flag an edit to an existing migration, because nothing said the file was already merged. The prompt now says a modified file existed before the PR. It also says to hold the change to the decision as written, not to a stricter version: the model had been treating `-> dict` as missing "full type hints".
 
-Mean of 3 runs each, with the range when runs disagreed:
+Mean of the runs, with the range when they disagreed:
 
-| | Before | After |
-| --- | --- | --- |
-| Extraction precision | 0.90 (0.86–0.92) | **1.00** |
-| Extraction recall | 1.00 | 1.00 |
-| Extraction: discussions without a decision left empty | 0.88 (0.82–0.91) | **1.00** |
-| Conflict precision | 0.98 (0.94–1.00) | 0.94 |
-| Conflict recall | 0.83 | **0.92** (0.89–0.94) |
-| Conflict retrieval recall | 0.89 | **0.94** |
-| Clean PRs left alone | 0.96 (0.88–1.00) | 0.87 (0.86–0.88) |
+| | Before fixes | After fixes 1–2 | After fixes 1–5 |
+| --- | --- | --- | --- |
+| Extraction precision | 0.90 (0.86–0.92) | 1.00 | 1.00 |
+| Extraction recall | 1.00 | 1.00 | 1.00 |
+| Extraction: discussions without a decision left empty | 0.88 (0.82–0.91) | 1.00 | 1.00 |
+| Conflict precision | 0.98 (0.94–1.00) | 0.94 | 0.97 (0.95–1.00) |
+| Conflict recall | 0.83 | 0.92 (0.89–0.94) | **1.00** |
+| Conflict retrieval recall | 0.89 | 0.94 | **1.00** |
+| Clean PRs left alone | 0.96 (0.88–1.00) | 0.87 (0.86–0.88) | **1.00** |
+| Runs | 3 | 3 | 2 |
 
-The second measurement's failures are in [`evals/RESULTS.md`](backend/evals/RESULTS.md). Two of them led to two more fixes:
-
-- **A false alarm on chk-02, an endpoint with full type hints, in every run.** The model's own explanation ended with "None of the decisions are violated": the response format had it commit to a conflict before reasoning about it. Now each entry gives the evidence and the reasoning first, and a yes-or-no `breaks_decision` verdict last, and only the yes answers are kept.
-- **A miss on chk-01: a `print` call wasn't caught,** because "Use the logging module instead of print" ranked 11th of 20. All 20 decisions fell between distance 0.36 and 0.49: one query per file blends everything that file does. Two things didn't work. Windows of 3 or 5 lines fixed this miss but caused another, and keyword matching was too noisy (words like `app`, `json` and `log` matched rules in clean PRs). What did work: each added line now gets its own query too. Retrieval recall on the set went from 17/18 to 18/18, and the rule now ranks 7th.
-
-Run on their own, both cases now pass in 3 of 3 runs. **The full 3-run measurement with these two fixes is still to come.** The free tier's daily limit of 1,000 embedding requests ran out before it could finish, and the table above doesn't include them yet. Still open: chk-15, an edit to a released migration, was missed in 1 run of 3.
+The last measurement has 2 runs: the free tier's daily quota ran out during the third. Its failures are in [`evals/RESULTS.md`](backend/evals/RESULTS.md). One is left: in chk-22, an async endpoint makes a blocking database call, which is correctly flagged. But in 1 of 2 runs the model also flagged `s.execute("SELECT count(*) FROM orders")` under "use parameterized queries", although that query is a fixed string with nothing to parameterize. That false alarm is left as it is (see the caveat on tuning below).
 
 **Caveats**
 
 - **The cases are small and synthetic.** They were written for this project, not taken from real teams' reviews. They catch regressions when a prompt or model changes. They don't prove accuracy on real code.
 - **The labels are hand-written** and could be wrong. When a case fails, check the label before blaming the model.
+- **The prompts were tuned on these same cases.** Fixes 4 and 5 were made after seeing which cases failed, so the last column is likely better than results on new cases would be. Each fix is a general rule, not a case-specific one, and tuning stopped once only one intermittent false alarm was left. A second, held-out set would show how much this matters.
 - **Runs vary.** Gemini isn't deterministic even at temperature 0: a case can pass in one run and fail in the next. Compare changes with `--repeat`, not with a single run.
-- **It's slow on the free tier.** A full run makes about 80 requests. On the free tier, 3 runs can take hours of waiting out rate limits. Cases Gemini still refuses after retries are listed as not scored, instead of being counted as failures: 3 of 138 in the latest measurement.
+- **It's slow on the free tier.** A full run makes about 80 requests. On the free tier, 3 runs can take hours of waiting out rate limits. The daily limits (1,000 embedding requests, for example) allow roughly one full 3-run measurement a day, with room for a few single-case checks. Cases Gemini still refuses after retries are listed as not scored instead of being counted as failures, and a used-up daily quota stops the run without saving.
 
 ## Deploying for free
 

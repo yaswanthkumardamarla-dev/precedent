@@ -128,7 +128,9 @@ CONFLICT_PROMPT = """You check a pull request against decisions the team made in
 For each decision the change might go against, quote the added lines, reason about them, and only then
 decide breaks_decision. Set it true ONLY when the changes clearly go against the decision.
 - Judge the added lines (those starting with +). Removed lines are not a conflict.
+- A file marked (modified) already existed before this pull request, as merged code; one marked (added) is new.
 - A decision that is merely related to the change, or that the change follows, is NOT a conflict.
+- Hold the change to the decision as written, not to a stricter version of it.
 - If you are not sure, set breaks_decision to false. A false alarm is worse than a miss.
 - decision_id must be the number from one of the [decision N] tags below.
 - If nothing could conflict, return an empty list.
